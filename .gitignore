@@ -6,6 +6,7 @@ __cache__
 .coverage
 **/outputs
 joblib/
+/data/
 
 # IDE specific folders
 .vscode
