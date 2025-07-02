@@ -5,21 +5,21 @@ Benchmarking deep learning optimization with nanoGPT
 
 This benchmark is dedicated to evaluate new deep learning optimization methods
 on the nanoGPT architecture.
-The optimization problem is defined as in the original speedrun of nanoGPT (see [here](https://github.com/KellerJordan/modded-nanogpt/tree/master?tab=readme-ov-file)):
+The optimization problem is defined as in the original speedrun of nanoGPT (see [here](https://github.com/KellerJordan/modded-nanogpt)):
    - The training and validation is perfromed on [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) -- Do not change the dataloaders.
    - The training is stopped once the validation loss is below ``3.28``.
 
 
-$$\\min_{\\beta} f(X, \\beta),$$
-
-where $X$ is the matrix of data and $\\beta$ is the optimization variable.
+For now, the repository contains a single solver, Adam, and run on CPU.
+The dataloaders are working but with fixed sequence length of 128 tokens.
+We used the original code from nanoGPT ([GPT2 from llm.c](https://github.com/karpathy/llm.c)), but use the simple dataloader from [modded-nanogpt](https://github.com/KellerJordan/modded-nanogpt).
 
 TODO:
 
-- First we would like to reproduce the orignal result from the ``train_gpt2.py`` script.
-- The goal is to make it easy to compare different optimization methods, not changes in the architecture.
-- It should run this on 8xH00 GPus, but having the possibility to run
-  this on single GPU would also be convenient.
+- Make it run on 1 GPU and multiple ones.
+- Tweak the dataloaders to make it more efficient/less error prone.
+- See how to add a new optimizer with limited code.
+- See if we want to add imporevments to the architecture (QK-norm, Rotary embeddings, etc.).
 
 Install
 --------
