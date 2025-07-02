@@ -29,7 +29,7 @@ def distributed_data_generator(filename_pattern, batch_size, rank=0, world_size=
         if pos + batch_size + 1 >= len(tokens):
             tokens, pos = _load_data_shard(next(file_iter)), 0
         buf = tokens[pos + rank * local_batch_size:][:local_batch_size + 1]
-        inputs = buf[:-1].to(dtype=torch.int32, **cuda_args).view(-1, 128) # no sync on host side;
-        targets = buf[1:].to(dtype=torch.int64, **cuda_args).view(-1, 128) # H2D in another stream isn't helpful.
+        inputs = buf[:-1].to(dtype=torch.int32, **cuda_args).view(-1, 1024) # no sync on host side;
+        targets = buf[1:].to(dtype=torch.int64, **cuda_args).view(-1, 1024) # H2D in another stream isn't helpful.
         pos += batch_size
         yield inputs, targets

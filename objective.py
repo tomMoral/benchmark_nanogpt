@@ -5,7 +5,11 @@ from benchopt import BaseObjective, safe_import_context
 # - getting requirements info when all dependencies are not installed.
 with safe_import_context() as import_ctx:
     import torch
+    from tqdm import trange
     from benchmark_utils.dataloading import distributed_data_generator
+
+
+VAL_TOKENS = 10485760
 
 
 # The benchmark objective must be named `Objective` and
@@ -31,20 +35,22 @@ class Objective(BaseObjective):
 
     def evaluate_result(self, model):
         model.eval()
+        val_batch_size = 64 * 1024  # 64k tokens per batch
         val_loader = distributed_data_generator(
-            self.val_files, batch_size=2*128, rank=0, world_size=1
+            self.val_files, batch_size=val_batch_size, rank=0, world_size=1
         )
 
         with torch.no_grad():
             # Compute the validation loss
             val_loss, n_batches = 0.0, 0
-            for i, batch in enumerate(val_loader):
-                if i > 0: break
-                inputs, targets = batch
+            for _ in trange(VAL_TOKENS // val_batch_size, desc="Validation", leave=False):
+                inputs, targets = next(val_loader)
                 _, loss = self.model(inputs, targets, return_logits=False)
                 val_loss += loss.item()
                 n_batches += 1
             val_loss /= n_batches
+
+        del val_loader
 
         # This method can return many metrics in a dictionary. One of these
         # metrics needs to be `value` for convergence detection purposes.

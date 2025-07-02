@@ -49,7 +49,7 @@ class Solver(BaseSolver):
 
     def set_objective(self, train_files, model):
         self.train_files = train_files
-        self.model = model
+        self.model = torch.compile(model)
 
         # configure the optimizer
         # List all parameters that require gradients
@@ -71,7 +71,7 @@ class Solver(BaseSolver):
         )
 
     def get_next(self, stop_val):
-        return stop_val + 2
+        return stop_val + 125
 
     def run(self, cb):
 
@@ -94,13 +94,14 @@ class Solver(BaseSolver):
             master_process = True
 
         train_loader = distributed_data_generator(
-            self.train_files, batch_size=self.batch_size * 128,
+            self.train_files, batch_size=self.batch_size * 1024,
             rank=rank, world_size=world_size
         )
+        self.model = self.model.to(device)
 
         step = 0
         while cb():
-            print(f"Step {step} (rank {rank})")
+            print(f"Step {step} (rank {rank})\r", end='', flush=True)
 
             self.model.train()
             self.optimizer.zero_grad(set_to_none=True)
