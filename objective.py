@@ -15,7 +15,7 @@ class Objective(BaseObjective):
     name = "Ordinary Least Squares"
 
     # URL of the main repo for this benchmark.
-    url = "https://github.com/#ORG/#BENCHMARK_NAME"
+    url = "https://github.com/tomMoral/benchmark_nanogpt"
 
     # List of parameters for the objective. The benchmark will consider
     # the cross product for each key in the dictionary.
