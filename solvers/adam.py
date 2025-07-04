@@ -107,6 +107,8 @@ class Solver(BaseSolver):
             self.optimizer.zero_grad(set_to_none=True)
 
             step += 1
+            if step == self.num_steps:
+                break
             inputs, targets = next(train_loader)
             self.model(inputs, targets, return_logits=False)[1].backward()
             if ddp:
