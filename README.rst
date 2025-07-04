@@ -41,7 +41,7 @@ Apart from the problem, options can be passed to ``benchopt run``, to restrict t
 
 Use ``benchopt run -h`` for more details about these options, or visit https://benchopt.github.io/api.html.
 
-.. |Build Status| image:: https://github.com/tomMoral/benchmark_nanogpt/actoiworkflows/main.yml/badge.svg
+.. |Build Status| image:: https://github.com/tomMoral/benchmark_nanogpt/actions/workflows/main.yml/badge.svg
    :target: https://github.com/tomMoral/benchmark_nanogpt/actions
 .. |Python 3.10+| image:: https://img.shields.io/badge/python-3.10%2B-blue
    :target: https://www.python.org/downloads/release/python-3100/
