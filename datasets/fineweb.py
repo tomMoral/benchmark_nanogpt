@@ -3,17 +3,17 @@ from benchopt.config import get_data_path
 
 
 with safe_import_context() as import_ctx:
+
     import torch
     import glob
     from pathlib import Path
     from tqdm.auto import tqdm
+    from huggingface_hub import hf_hub_download
 
     from benchmark_utils.model_gpt2 import GPT, GPTConfig
 
 
 def download_data(data_dir, n_chunks=104):
-
-    from huggingface_hub import hf_hub_download
 
     # Download the GPT-2 tokens of Fineweb10B from huggingface. This
     # saves about an hour of startup time compared to regenerating them.
