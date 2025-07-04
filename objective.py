@@ -17,7 +17,7 @@ class Objective(BaseObjective):
     # URL of the main repo for this benchmark.
     url = "https://github.com/tomMoral/benchmark_nanogpt"
 
-    requirements = ["torch", "tqdm"]
+    requirements = ["pytorch", "tqdm"]
 
     # Minimal version of benchopt required to run this benchmark.
     # Bump it up if the benchmark depends on a new feature of benchopt.
