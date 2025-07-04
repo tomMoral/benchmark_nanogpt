@@ -2,10 +2,11 @@ from benchopt import BaseDataset, safe_import_context
 from benchopt.config import get_data_path
 
 
-# Protect the import with `safe_import_context()`. This allows:
-# - skipping import to speed up autocompletion in CLI.
-# - getting requirements info when all dependencies are not installed.
 with safe_import_context() as import_ctx:
+    import torch
+    import glob
+    from pathlib import Path
+    from tqdm.auto import tqdm
 
     from benchmark_utils.model_gpt2 import GPT, GPTConfig
 
@@ -24,17 +25,72 @@ def download_data(data_dir, n_chunks=104):
                             repo_type="dataset", local_dir=data_dir)
 
 
-# All datasets must be named `Dataset` and inherit from `BaseDataset`
+def _load_data_shard(file):
+    # header is 256 int32
+    header = torch.from_file(str(file), False, 256, dtype=torch.int32)
+    assert header[0] == 20240520, "magic number mismatch in the data .bin file"
+    assert header[1] == 1, "unsupported version"
+    num_tokens = int(header[2])  # number of tokens (claimed)
+    with file.open("rb", buffering=0) as f:
+        pin_memory = torch.cuda.is_available()
+        # avoid pin_memory copy by @YouJiacheng
+        tokens = torch.empty(
+            num_tokens, dtype=torch.uint16, pin_memory=pin_memory
+        )
+        f.seek(256 * 4)
+        # avoid bytes->array copy by @YouJiacheng
+        nbytes = f.readinto(tokens.numpy())
+        assert nbytes == 2 * num_tokens, (
+            "number of tokens read does not match header"
+        )
+    return tokens
+
+
+class DistributedDataLoader:
+    def __init__(self, filename_pattern, max_tokens=None):
+        self.filename_pattern = filename_pattern
+        self.max_tokens = max_tokens
+
+    def get_distributed_data_generator(self, batch_size, rank=0, world_size=1):
+        files = [
+            Path(file) for file in sorted(glob.glob(self.filename_pattern))
+        ]
+        assert batch_size % world_size == 0
+        if self.max_tokens is not None:
+            assert self.max_tokens % batch_size == 0
+        local_batch_size = batch_size // world_size
+        # use itertools.cycle(files) for multi-epoch training
+        file_iter = iter(files)
+        tokens, pos = _load_data_shard(next(file_iter)), 0
+
+        cuda_args = (
+            dict(device="cuda", non_blocking=True)
+            if torch.cuda.is_available() else {}
+        )
+        if self.max_tokens is not None:
+            progress = tqdm(total=self.max_tokens, desc="Validation")
+        while True:
+            if pos + batch_size + 1 >= len(tokens):
+                tokens, pos = _load_data_shard(next(file_iter)), 0
+            buf = tokens[pos + rank * local_batch_size:][:local_batch_size + 1]
+            # no sync on host side;
+            inputs = buf[:-1].to(dtype=torch.int32, **cuda_args).view(-1, 1024)
+            targets = buf[1:].to(dtype=torch.int64, **cuda_args).view(-1, 1024)
+            pos += batch_size
+            if self.max_tokens is not None:
+                progress.update(batch_size)
+            yield inputs, targets
+            if self.max_tokens is not None:
+                if pos >= self.max_tokens:
+                    break
+
+
 class Dataset(BaseDataset):
 
-    # Name to select the dataset in the CLI and to display the results.
     name = "Fine-web"
-
-    # List of parameters to generate the datasets. The benchmark will consider
-    # the cross product for each key in the dictionary.
-    # Any parameters 'param' defined here is available as `self.param`.
     parameters = {
         'n_chunks': [2],
+        'debug': [False]
     }
 
     # List of packages needed to run the dataset. See the corresponding
@@ -55,7 +111,12 @@ class Dataset(BaseDataset):
 
         # The dictionary defines the keyword arguments for `Objective.set_data`
         return dict(
-            train_files=str(data_dir / "fineweb_train_*.bin"),
-            val_files=str(data_dir / "fineweb_val_*.bin"),
+            train_dataloader=DistributedDataLoader(
+                str(data_dir / "fineweb_train_*.bin")
+            ),
+            val_dataloader=DistributedDataLoader(
+                str(data_dir / "fineweb_val_*.bin"),
+                max_tokens=10485760 // 160 // 8 if self.debug else 10485760
+            ),
             model=model,
         )

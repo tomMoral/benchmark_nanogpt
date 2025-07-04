@@ -12,8 +12,6 @@ with safe_import_context() as import_ctx:
     import torch.distributed as dist
     from torch.optim import AdamW
 
-    from benchmark_utils.dataloading import distributed_data_generator
-
 
 # learning rate schedule: stable then decay
 def get_lr(step, num_iterations, cooldown_frac=0.4):
@@ -49,8 +47,8 @@ class Solver(BaseSolver):
 
     sampling_strategy = 'callback'
 
-    def set_objective(self, train_files, model):
-        self.train_files = train_files
+    def set_objective(self, train_dataloader, model):
+        self.train_dataloader = train_dataloader
         self.model = torch.compile(model)
 
         # configure the optimizer
@@ -99,9 +97,8 @@ class Solver(BaseSolver):
             device = "cuda" if torch.cuda.is_available() else "cpu"
             master_process = True  # noqa: F841
 
-        train_loader = distributed_data_generator(
-            self.train_files, batch_size=self.batch_size * 1024,
-            rank=rank, world_size=world_size
+        train_loader = self.train_dataloader.get_distributed_data_generator(
+            batch_size=self.batch_size * 1024, rank=rank, world_size=world_size
         )
         self.model = self.model.to(device)
 
@@ -115,8 +112,9 @@ class Solver(BaseSolver):
                 progress.update()
                 if step == self.num_steps:
                     break
-                inputs, targets = next(train_loader)
-                self.model(inputs, targets, return_logits=False)[1].backward()
+                data = next(train_loader)
+                loss, *_ = self.model(*data)
+                loss.backward()
                 if ddp:
                     for param in self.model.parameters():
                         dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)

@@ -192,12 +192,7 @@ class GPT(nn.Module):
             logits = self.lm_head(x[:, [-1], :])
             loss = None
 
-        # there are performance reasons why not returning logits is prudent,
-        # if not needed
-        if not return_logits:
-            logits = None
-
-        return logits, loss
+        return loss, logits
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
@@ -216,7 +211,7 @@ class GPT(nn.Module):
                 else idx[:, -self.config.block_size:]
             )
             # forward the model to get the logits for the index in the sequence
-            logits, _ = self(idx_cond)
+            _, logits = self(idx_cond)
             # pluck the logits at the final step and scale
             # by desired temperature
             logits = logits[:, -1, :] / temperature

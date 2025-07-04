@@ -6,10 +6,6 @@ from benchopt import BaseObjective, safe_import_context
 with safe_import_context() as import_ctx:
     import torch
     from tqdm.auto import trange
-    from benchmark_utils.dataloading import distributed_data_generator
-
-
-VAL_TOKENS = 10485760
 
 
 # The benchmark objective must be named `Objective` and
@@ -28,25 +24,23 @@ class Objective(BaseObjective):
     # Bump it up if the benchmark depends on a new feature of benchopt.
     min_benchopt_version = "1.6"
 
-    def set_data(self, train_files, val_files, model):
-        self.train_files = train_files
-        self.val_files = val_files
+    def set_data(self, train_dataloader, val_dataloader, model):
+        self.train_dataloader = train_dataloader
+        self.val_dataloader = val_dataloader
         self.model = model
 
     def evaluate_result(self, model):
         model.eval()
-        val_batch_size = 64 * 1024  # 64k tokens per batch
-        val_loader = distributed_data_generator(
-            self.val_files, batch_size=val_batch_size, rank=0, world_size=1
+        val_batch_size = 8 * 1024  # 64k tokens per batch
+        val_loader = self.val_dataloader.get_distributed_data_generator(
+            batch_size=val_batch_size, rank=0, world_size=1
         )
 
         with torch.no_grad():
             # Compute the validation loss
             val_loss, n_batches = 0.0, 0
-            n_steps = VAL_TOKENS // val_batch_size
-            for _ in trange(n_steps, desc="Validation", leave=False):
-                inputs, targets = next(val_loader)
-                _, loss = self.model(inputs, targets, return_logits=False)
+            for data in val_loader:
+                loss, *_ = self.model(*data)
                 val_loss += loss.item()
                 n_batches += 1
             val_loss /= n_batches
@@ -71,6 +65,6 @@ class Objective(BaseObjective):
         # benchmark's API for passing the objective to the solver.
         # It is customizable for each benchmark.
         return dict(
-            train_files=self.train_files,
+            train_dataloader=self.train_dataloader,
             model=self.model,
         )
