@@ -5,7 +5,6 @@ from benchopt import BaseObjective, safe_import_context
 # - getting requirements info when all dependencies are not installed.
 with safe_import_context() as import_ctx:
     import torch
-    from tqdm.auto import trange
 
 
 # The benchmark objective must be named `Objective` and
