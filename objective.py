@@ -5,11 +5,6 @@ from benchopt import BaseObjective, safe_import_context
 # - getting requirements info when all dependencies are not installed.
 with safe_import_context() as import_ctx:
     import torch
-    from tqdm import trange
-    from benchmark_utils.dataloading import distributed_data_generator
-
-
-VAL_TOKENS = 10485760
 
 
 # The benchmark objective must be named `Objective` and
@@ -17,35 +12,34 @@ VAL_TOKENS = 10485760
 class Objective(BaseObjective):
 
     # Name to select the objective in the CLI and to display the results.
-    name = "Ordinary Least Squares"
+    name = "Deep Learning Optimization with NanoGPT"
 
     # URL of the main repo for this benchmark.
     url = "https://github.com/tomMoral/benchmark_nanogpt"
 
-    requirements = ["torch"]
+    requirements = ["pytorch", "tqdm"]
 
     # Minimal version of benchopt required to run this benchmark.
     # Bump it up if the benchmark depends on a new feature of benchopt.
-    min_benchopt_version = "1.6"
+    min_benchopt_version = "1.7"
 
-    def set_data(self, train_files, val_files, model):
-        self.train_files = train_files
-        self.val_files = val_files
+    def set_data(self, train_dataloader, val_dataloader, model):
+        self.train_dataloader = train_dataloader
+        self.val_dataloader = val_dataloader
         self.model = model
 
     def evaluate_result(self, model):
         model.eval()
-        val_batch_size = 64 * 1024  # 64k tokens per batch
-        val_loader = distributed_data_generator(
-            self.val_files, batch_size=val_batch_size, rank=0, world_size=1
+        val_batch_size = 8 * 1024  # 64k tokens per batch
+        val_loader = self.val_dataloader.get_distributed_data_generator(
+            batch_size=val_batch_size, rank=0, world_size=1
         )
 
         with torch.no_grad():
             # Compute the validation loss
             val_loss, n_batches = 0.0, 0
-            for _ in trange(VAL_TOKENS // val_batch_size, desc="Validation", leave=False):
-                inputs, targets = next(val_loader)
-                _, loss = self.model(inputs, targets, return_logits=False)
+            for data in val_loader:
+                loss, *_ = self.model(*data)
                 val_loss += loss.item()
                 n_batches += 1
             val_loss /= n_batches
@@ -70,6 +64,6 @@ class Objective(BaseObjective):
         # benchmark's API for passing the objective to the solver.
         # It is customizable for each benchmark.
         return dict(
-            train_files=self.train_files,
+            train_dataloader=self.train_dataloader,
             model=self.model,
         )
