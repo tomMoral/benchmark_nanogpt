@@ -95,7 +95,7 @@ class Dataset(BaseDataset):
 
     # List of packages needed to run the dataset. See the corresponding
     # section in objective.py
-    requirements = []
+    requirements = ["huggingface_hub"]
 
     def get_data(self):
 
