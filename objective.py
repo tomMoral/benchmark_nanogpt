@@ -30,7 +30,7 @@ class Objective(BaseObjective):
 
     def evaluate_result(self, model):
         model.eval()
-        val_batch_size = 8 * 1024  # 64k tokens per batch
+        val_batch_size = 64 * 1024  # 64k tokens per batch
         val_loader = self.val_dataloader.get_distributed_data_generator(
             batch_size=val_batch_size, rank=0, world_size=1
         )
