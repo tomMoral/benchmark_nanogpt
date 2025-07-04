@@ -6,6 +6,8 @@ from benchopt import BaseSolver, safe_import_context
 with safe_import_context() as import_ctx:
     import os
 
+    from tqdm.auto import tqdm
+
     import torch
     import torch.distributed as dist
     from torch.optim import AdamW
@@ -37,7 +39,7 @@ class Solver(BaseSolver):
     parameters = {
         'learning_rate': [1e-4],
         'weight_decay': [1e-4],
-        'num_steps': [2000],
+        'num_steps': [3000],
         'batch_size': [64],
     }
 
@@ -53,10 +55,14 @@ class Solver(BaseSolver):
 
         # configure the optimizer
         # List all parameters that require gradients
-        param_dict = {pn: p for pn, p in self.model.named_parameters() if p.requires_grad}
+        param_dict = {
+            pn: p for pn, p in self.model.named_parameters()
+            if p.requires_grad
+        }
 
-        # create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
-        # i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+        # create optim groups. Any parameters that is 2D will be weight
+        # decayed, otherwise no. i.e. all weight tensors in
+        # matmuls + embeddings decay, all biases and layernorms don't.
         decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
         nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
         optim_groups = [
@@ -71,27 +77,27 @@ class Solver(BaseSolver):
         )
 
     def get_next(self, stop_val):
-        return stop_val + 125
+        return stop_val + 250
 
     def run(self, cb):
 
         # torchrun sets these env variables
-        ddp = int(os.environ.get('RANK', -1)) != -1 # is this a ddp run?
+        ddp = int(os.environ.get('RANK', -1)) != -1  # is this a ddp run?
         if ddp:
             rank = int(os.environ["RANK"])
             world_size = int(os.environ["WORLD_SIZE"])
-            # assert world_size == 8 # this code is designed for 8xH100
-            # assert torch.cuda.is_available()
+            assert torch.cuda.is_available()
             device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
             torch.cuda.set_device(device)
             dist.init_process_group(backend="nccl", device_id=device)
             dist.barrier()
-            master_process = (rank == 0) # this process will do logging, checkpointing etc.
+            # this process will do logging, checkpointing etc.
+            master_process = (rank == 0)
         else:
             rank = 0
             world_size = 1
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            master_process = True
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            master_process = True  # noqa: F841
 
         train_loader = distributed_data_generator(
             self.train_files, batch_size=self.batch_size * 1024,
@@ -100,26 +106,27 @@ class Solver(BaseSolver):
         self.model = self.model.to(device)
 
         step = 0
-        while cb():
-            print(f"Step {step} (rank {rank})\r", end='', flush=True)
+        with tqdm(total=self.num_steps, desc="Training") as progress:
+            while cb():
+                self.model.train()
+                self.optimizer.zero_grad(set_to_none=True)
 
-            self.model.train()
-            self.optimizer.zero_grad(set_to_none=True)
+                step += 1
+                progress.update()
+                if step == self.num_steps:
+                    break
+                inputs, targets = next(train_loader)
+                self.model(inputs, targets, return_logits=False)[1].backward()
+                if ddp:
+                    for param in self.model.parameters():
+                        dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
 
-            step += 1
-            if step == self.num_steps:
-                break
-            inputs, targets = next(train_loader)
-            self.model(inputs, targets, return_logits=False)[1].backward()
-            if ddp:
-                for param in self.model.parameters():
-                    dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
-
-            # determine and set the learning rate for this iteration
-            for param_group in self.optimizer.param_groups:
-                param_group['lr'] = self.learning_rate * get_lr(step, self.num_steps)
-            # step the self.optimizer
-            self.optimizer.step()
+                # determine and set the learning rate for this iteration
+                scale_lr = get_lr(step, self.num_steps)
+                for param_group in self.optimizer.param_groups:
+                    param_group['lr'] = self.learning_rate * scale_lr
+                # step the self.optimizer
+                self.optimizer.step()
 
     def get_result(self):
         if torch.cuda.is_available():
