@@ -50,9 +50,12 @@ class Solver(BaseSolver):
     def set_objective(self, train_dataloader, model):
 
         # Use submitit helpers to setup distributed training easily.
-        import submitit
-        submitit.helpers.TorchDistributedEnvironment().export()
-        ddp = int(os.environ.get('RANK', -1)) != -1  # is this a ddp run?
+        try:
+            import submitit
+            submitit.helpers.TorchDistributedEnvironment().export()
+            ddp = int(os.environ.get('RANK', -1)) != -1  # is this a ddp run?
+        except (ImportError, RuntimeError):
+            ddp = False
         if ddp:
             print("Running in Distributed Data Parallel (DDP) mode")
             self.rank = int(os.environ["RANK"])
