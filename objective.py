@@ -21,19 +21,27 @@ class Objective(BaseObjective):
 
     # Minimal version of benchopt required to run this benchmark.
     # Bump it up if the benchmark depends on a new feature of benchopt.
-    min_benchopt_version = "1.7"
+    min_benchopt_version = "1.6"
 
     def set_data(self, train_dataloader, val_dataloader, model):
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
         self.model = model
 
-    def evaluate_result(self, model):
+    def evaluate_result(self, model, dist=None):
         model.eval()
-        val_batch_size = 64 * 1024  # 64k tokens per batch
-        val_loader = self.val_dataloader.get_distributed_data_generator(
-            batch_size=val_batch_size, rank=0, world_size=1
-        )
+        val_batch_size = 32 * 1024  # 32k tokens per batch
+        if dist is not None:
+            # In distributed mode, we use the distributed data generator
+            rank, size = dist.get_rank(), dist.get_world_size()
+            val_loader = self.val_dataloader.get_distributed_data_generator(
+                batch_size=val_batch_size * size, rank=rank, world_size=size
+            )
+        else:
+            # In non-distributed mode, we use the regular data generator
+            val_loader = self.val_dataloader.get_distributed_data_generator(
+                batch_size=val_batch_size, rank=0, world_size=1
+            )
 
         with torch.no_grad():
             # Compute the validation loss
@@ -43,6 +51,12 @@ class Objective(BaseObjective):
                 val_loss += loss.item()
                 n_batches += 1
             val_loss /= n_batches
+
+            if dist is not None:
+                # Average the validation loss across all processes
+                val_loss_tensor = torch.tensor(val_loss, device=model.device)
+                dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.AVG)
+                val_loss = val_loss_tensor.item()
 
         del val_loader
 
