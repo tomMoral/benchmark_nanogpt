@@ -138,6 +138,11 @@ class GPT(nn.Module):
         self.init_rng.manual_seed(42)
         self.apply(self._init_weights)
 
+    def to(self, **kwargs):
+        if 'device' in kwargs:
+            self.device = kwargs['device']
+        return super().to(**kwargs)
+
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             # apply special scaled init to the residual projections,

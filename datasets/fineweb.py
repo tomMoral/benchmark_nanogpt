@@ -116,7 +116,7 @@ class Dataset(BaseDataset):
             ),
             val_dataloader=DistributedDataLoader(
                 str(data_dir / "fineweb_val_*.bin"),
-                max_tokens=10485760 // 160 // 8 if self.debug else 10485760
+                max_tokens=10485760 // 20 if self.debug else 10485760
             ),
             model=model,
         )

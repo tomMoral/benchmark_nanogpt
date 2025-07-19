@@ -35,10 +35,10 @@ class Solver(BaseSolver):
     # the cross product for each key in the dictionary.
     # All parameters 'p' defined here are available as 'self.p'.
     parameters = {
-        'learning_rate': [1e-4],
+        'learning_rate': [1e-3],
         'weight_decay': [1e-4],
         'num_steps': [3000],
-        'batch_size': [64],
+        'batch_size': [16],
     }
 
     # List of packages needed to run the solver. See the corresponding
@@ -48,8 +48,42 @@ class Solver(BaseSolver):
     sampling_strategy = 'callback'
 
     def set_objective(self, train_dataloader, model):
-        self.train_dataloader = train_dataloader
+
+        # Use submitit helpers to setup distributed training easily.
+        try:
+            import submitit
+            submitit.helpers.TorchDistributedEnvironment().export()
+            ddp = int(os.environ.get('RANK', -1)) != -1  # is this a ddp run?
+        except (ImportError, RuntimeError):
+            ddp = False
+        if ddp:
+            print("Running in Distributed Data Parallel (DDP) mode")
+            self.rank = int(os.environ["RANK"])
+            self.world_size = int(os.environ["WORLD_SIZE"])
+            assert torch.cuda.is_available()
+            # TorchDistributedEnvironment sets the visible devices to the
+            # current rank, so we can use the default device.
+            device = torch.device("cuda", 0)
+            torch.cuda.set_device(device)
+            dist.init_process_group(backend="nccl", device_id=device)
+            self.dist = dist
+        else:
+            self.rank = 0
+            self.world_size = 1
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.dist = None
+        model = model.to(device=device)
         self.model = torch.compile(model)
+        self.model.device = device  # store the device in the model
+        self.train_dataloader = train_dataloader
+
+    def get_next(self, stop_val):
+        return stop_val + 250
+
+    def warm_up(self):
+        self.run_once(stop_val=10)
+
+    def run(self, cb):
 
         # configure the optimizer
         # List all parameters that require gradients
@@ -74,33 +108,13 @@ class Solver(BaseSolver):
             optim_groups, lr=self.learning_rate, betas=(0.9, 0.95), fused=True
         )
 
-    def get_next(self, stop_val):
-        return stop_val + 250
-
-    def run(self, cb):
-
-        # torchrun sets these env variables
-        ddp = int(os.environ.get('RANK', -1)) != -1  # is this a ddp run?
-        if ddp:
-            rank = int(os.environ["RANK"])
-            world_size = int(os.environ["WORLD_SIZE"])
-            assert torch.cuda.is_available()
-            device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
-            torch.cuda.set_device(device)
-            dist.init_process_group(backend="nccl", device_id=device)
-            dist.barrier()
-            # this process will do logging, checkpointing etc.
-            master_process = (rank == 0)
-        else:
-            rank = 0
-            world_size = 1
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            master_process = True  # noqa: F841
-
         train_loader = self.train_dataloader.get_distributed_data_generator(
-            batch_size=self.batch_size * 1024, rank=rank, world_size=world_size
+            batch_size=self.batch_size * 1024 * self.world_size,
+            rank=self.rank, world_size=self.world_size
         )
-        self.model = self.model.to(device)
+
+        if self.dist is not None:
+            self.dist.barrier()  # wait for all processes to be ready
 
         step = 0
         with tqdm(total=self.num_steps, desc="Training") as progress:
@@ -115,9 +129,11 @@ class Solver(BaseSolver):
                 data = next(train_loader)
                 loss, *_ = self.model(*data)
                 loss.backward()
-                if ddp:
+                if self.dist is not None:
                     for param in self.model.parameters():
-                        dist.all_reduce(param.grad, op=dist.ReduceOp.AVG)
+                        self.dist.all_reduce(
+                            param.grad, op=self.dist.ReduceOp.AVG
+                        )
 
                 # determine and set the learning rate for this iteration
                 scale_lr = get_lr(step, self.num_steps)
@@ -129,4 +145,4 @@ class Solver(BaseSolver):
     def get_result(self):
         if torch.cuda.is_available():
             torch.cuda.synchronize()  # wait for all operations to finish
-        return dict(model=self.model)
+        return dict(model=self.model, dist=self.dist)
