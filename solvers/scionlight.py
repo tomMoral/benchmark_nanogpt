@@ -1,15 +1,11 @@
-from benchopt import BaseSolver, safe_import_context
+from benchopt import BaseSolver
 
-# Protect the import with `safe_import_context()`. This allows:
-# - skipping import to speed up autocompletion in CLI.
-# - getting requirements info when all dependencies are not installed.
-with safe_import_context() as import_ctx:
-    import os
+import os
 
-    from tqdm.auto import tqdm
+from tqdm.auto import tqdm
 
-    import torch
-    import torch.distributed as dist
+import torch
+import torch.distributed as dist
 
 
 # -----------------------------------------------------------------------------
@@ -17,8 +13,7 @@ with safe_import_context() as import_ctx:
 
 
 def zeropower_via_newtonschulz5(G, steps=5):
-    """
-    Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
+    """Newton-Schulz iteration to compute the 0-th power/orthogonalize G.
     """
     assert len(G.shape) == 2
     a, b, c = (3.4445, -4.7750, 2.0315)
@@ -45,9 +40,15 @@ class Norm(object):
 
 
 class Spectral(Norm):
+    newton_schultz5 = None
+
     def __init__(self, steps=5):
         self.steps = steps
-        self.newton_schultz5 = torch.compile(zeropower_via_newtonschulz5)
+        # need to compile only at runtime to avoid issues with distributed
+        # training setup. Using a class attribute to avoid recompiling for
+        # each instantiation.
+        if self.newton_schultz5 is None:
+            self.newton_schultz5 = torch.compile(zeropower_via_newtonschulz5)
 
     def lmo(self, g):
         g = self.newton_schultz5(g.reshape(len(g), -1), steps=self.steps).view(
@@ -82,16 +83,21 @@ class ScionLight(torch.optim.Optimizer):
         params:
             Iterable of parameters to optimize or dicts defining parameter
             groups
-        lr (float, optional): Learning rate (default: 1e-3)
+        lr: float, optional (default: 1e-3)
+            Learning rate for the optimizer
         momentum: float, optional (default: 1.0)
             One minus the traditional momentum factor.
             For example, a traditional momentum of 0.9 would be specified as
             momentum=0.1 here
-        norm (str, optional):
-            Choice of norm for gradient projection ('Auto', 'Spectral', or 'Sign') (default: 'Auto')
-        norm_kwargs (dict, optional): Additional arguments for the norm projection (default: None)
-        scale (float, optional): Scale factor for updates (default: 1.0)
-        unconstrained (bool, optional): Whether to use unconstrained updates (default: False)
+        norm: str, optional (default: 'Auto')
+            Choice of norm for gradient projection in
+            ('Auto', 'Spectral', or 'Sign')
+        norm_kwargs: dict, optional (default: None)
+            Additional arguments for the norm projection
+        scale: float, optional (default: 1.0)
+            Scale factor for updates
+        unconstrained: bool, optional (default: False)
+            Whether to use unconstrained updates
 
     Example:
         >>> radius = 50.0
