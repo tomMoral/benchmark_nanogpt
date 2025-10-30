@@ -16,7 +16,6 @@ with safe_import_context() as import_ctx:
 # Scion optimizer implementation
 
 
-@torch.compile
 def zeropower_via_newtonschulz5(G, steps=5):
     """
     Newton-Schulz iteration to compute the zeroth power / orthogonalization of G.
@@ -48,9 +47,10 @@ class Norm(object):
 class Spectral(Norm):
     def __init__(self, steps=5):
         self.steps = steps
+        self.newton_schultz5 = torch.compile(zeropower_via_newtonschulz5)
 
     def lmo(self, g):
-        g = zeropower_via_newtonschulz5(g.reshape(len(g), -1), steps=self.steps).view(
+        g = self.newton_schultz5(g.reshape(len(g), -1), steps=self.steps).view(
             g.shape
         )
         d_out, d_in = g.shape
@@ -71,19 +71,24 @@ norm_dict = {"Spectral": Spectral, "Sign": Sign}
 
 
 class ScionLight(torch.optim.Optimizer):
-    """Memory-efficient variant of the Scion optimizer from https://github.com/LIONS-EPFL/scion/blob/main/examples/modded-nanogpt/train_gpt_scionlight.py
+    """Memory-efficient variant of the Scion optimizer from
+    https://github.com/LIONS-EPFL/scion/blob/main/examples/modded-nanogpt/train_gpt_scionlight.py
 
-    This implementation saves memory by storing only the averaged gradient instead of
-    both the gradient and its average. Note that gradients should not be zeroed since
-    p.grad is used directly to store the gradient average.
+    This implementation saves memory by storing only the averaged gradient
+    instead of both the gradient and its average. Note that gradients should
+    not be zeroed since p.grad is used directly to store the gradient average.
 
     Args:
-        params: Iterable of parameters to optimize or dicts defining parameter groups
+        params:
+            Iterable of parameters to optimize or dicts defining parameter
+            groups
         lr (float, optional): Learning rate (default: 1e-3)
-        momentum (float, optional): One minus the traditional momentum factor. For example,
-            a traditional momentum of 0.9 would be specified as momentum=0.1 here (default: 1.0)
-        norm (str, optional): Choice of norm for gradient projection ('Auto', 'SpectralConv',
-            'ColNorm', 'RowNorm', 'BiasRMS', 'Spectral', or 'Sign') (default: 'Auto')
+        momentum: float, optional (default: 1.0)
+            One minus the traditional momentum factor.
+            For example, a traditional momentum of 0.9 would be specified as
+            momentum=0.1 here
+        norm (str, optional):
+            Choice of norm for gradient projection ('Auto', 'Spectral', or 'Sign') (default: 'Auto')
         norm_kwargs (dict, optional): Additional arguments for the norm projection (default: None)
         scale (float, optional): Scale factor for updates (default: 1.0)
         unconstrained (bool, optional): Whether to use unconstrained updates (default: False)
@@ -166,7 +171,7 @@ def get_lr(step, num_iterations, cooldown_frac=0.4):
 # inherit from `BaseSolver` for `benchopt` to work properly.
 class Solver(BaseSolver):
     # Name to select the solver in the CLI and to display the results.
-    name = "ScionLight"
+    name = "Scion"
 
     # List of parameters for the solver. The benchmark will consider
     # the cross product for each key in the dictionary.
@@ -177,7 +182,9 @@ class Solver(BaseSolver):
         "hidden_radius": [50.0],
         "lm_head_radius": [3000.0],
         "num_steps": [3000],
-        "batch_size": [32],
+        "batch_size": [64],
+        "slurm_gres, slurm_ntasks_per_node": [("gpu:4", 4)],
+        "slurm_nodes": [1, 2],
     }
 
     # List of packages needed to run the solver.
@@ -215,6 +222,11 @@ class Solver(BaseSolver):
         self.model.device = device  # store the device in the model
         self.train_dataloader = train_dataloader
 
+    def __del__(self):
+        # Clean up communication resources
+        if getattr(self, "dist", None) is not None:
+            self.dist.destroy_process_group()
+
     def get_next(self, stop_val):
         return stop_val + 250
 
@@ -222,8 +234,8 @@ class Solver(BaseSolver):
         self.run_once(stop_val=10)
 
     def run(self, cb):
-        # Configure the optimizer with different groups for transformer and lm_head
-        # Get transformer parameters (use Spectral norm)
+        # Configure the optimizer with different groups for transformer and
+        # lm_head (Spectral norm for transformer, Sign for lm_head)
         transformer_params = []
         lm_head_params = []
 
@@ -283,7 +295,9 @@ class Solver(BaseSolver):
 
                 if self.dist is not None:
                     for param in self.model.parameters():
-                        self.dist.all_reduce(param.grad, op=self.dist.ReduceOp.AVG)
+                        self.dist.all_reduce(
+                            param.grad, op=self.dist.ReduceOp.AVG
+                        )
 
                 # determine and set the learning rate for this iteration
                 scale_lr = get_lr(step, self.num_steps)

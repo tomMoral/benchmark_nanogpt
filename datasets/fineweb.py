@@ -1,16 +1,13 @@
-from benchopt import BaseDataset, safe_import_context
+from benchopt import BaseDataset
 from benchopt.config import get_data_path
 
+import torch
+import glob
+from pathlib import Path
+from tqdm.auto import tqdm
+from huggingface_hub import hf_hub_download
 
-with safe_import_context() as import_ctx:
-
-    import torch
-    import glob
-    from pathlib import Path
-    from tqdm.auto import tqdm
-    from huggingface_hub import hf_hub_download
-
-    from benchmark_utils.model_gpt2 import GPT, GPTConfig
+from benchmark_utils.model_gpt2 import GPT, GPTConfig
 
 
 def download_data(data_dir, n_chunks=104):
@@ -89,7 +86,7 @@ class Dataset(BaseDataset):
 
     name = "Fine-web"
     parameters = {
-        'n_chunks': [2],
+        'n_chunks': [4],
         'debug': [False]
     }
 
@@ -98,6 +95,7 @@ class Dataset(BaseDataset):
     requirements = ["huggingface_hub"]
 
     def get_data(self):
+        print("Get data")
 
         data_dir = get_data_path("fineweb10B")
         download_data(data_dir, n_chunks=self.n_chunks)
