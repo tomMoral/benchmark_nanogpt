@@ -311,7 +311,8 @@ class Solver(BaseSolver):
                     param_group["lr"] = self.learning_rate * scale_lr
 
                 # step the optimizer
-                # Note: ScionLight uses gradients for momentum, so don't zero them
+                # Note: ScionLight uses gradients to store the momentum,
+                # so don't zero them
                 self.optimizer.step()
 
     def get_result(self):
