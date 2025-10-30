@@ -1,6 +1,7 @@
 from benchopt import BaseSolver
 
 import os
+from contextlib import nullcontext
 
 from tqdm.auto import tqdm
 
@@ -141,6 +142,8 @@ class ScionLight(torch.optim.Optimizer):
         )
         super().__init__(params, defaults)
 
+        self.step = torch.compile(torch.no_grad(self.step))
+
     def step(self):
         for group in self.param_groups:
             lr = group["lr"]
@@ -162,15 +165,15 @@ class ScionLight(torch.optim.Optimizer):
                     G.mul_(1 - momentum)
 
 
-# learning rate schedule: stable then decay
+# learning rate schedule: stable then decay to 0
 def get_lr(step, num_iterations, cooldown_frac=0.4):
     x = step / num_iterations  # progress in training
     assert 0 <= x < 1
     if x < 1 - cooldown_frac:
         return 1.0
     else:
-        w = (1 - x) / cooldown_frac
-        return w * 1.0 + (1 - w) * 0.1
+        return (1 - x) / cooldown_frac
+        # return w * 1.0 + (1 - w) * 0.1
 
 
 # The benchmark solvers must be named `Solver` and
@@ -183,14 +186,18 @@ class Solver(BaseSolver):
     # the cross product for each key in the dictionary.
     # All parameters 'p' defined here are available as 'self.p'.
     parameters = {
-        "learning_rate": [2**-12],  # ~0.000244
+        "learning_rate": [0.00036],
+        "cooldown_frac": [0.45],
         "momentum": [0.1],
         "hidden_radius": [50.0],
         "lm_head_radius": [3000.0],
-        "num_steps": [3000],
+        "num_steps": [6200],
         "batch_size": [64],
-        "slurm_gres, slurm_ntasks_per_node": [("gpu:4", 4)],
         "slurm_nodes": [1, 2],
+    }
+    slurm_params = {
+        "slurm_gres": "gpu:4",
+        "slurm_ntasks_per_node": 4,
     }
 
     # List of packages needed to run the solver.
@@ -224,9 +231,13 @@ class Solver(BaseSolver):
             device = "cuda" if torch.cuda.is_available() else "cpu"
             self.dist = None
         model = model.to(device=device)
-        self.model = torch.compile(model)
+        self.model = torch.compile(model, dynamic=False, fullgraph=True)
         self.model.device = device  # store the device in the model
         self.train_dataloader = train_dataloader
+        self.ctx = (
+            torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
+            if torch.cuda.is_available() else nullcontext()
+        )
 
     def __del__(self):
         # Clean up communication resources
@@ -296,7 +307,8 @@ class Solver(BaseSolver):
                     break
 
                 data = next(train_loader)
-                loss, *_ = self.model(*data)
+                with self.ctx:
+                    loss, *_ = self.model(*data)
                 loss.backward()
 
                 if self.dist is not None:
@@ -306,7 +318,7 @@ class Solver(BaseSolver):
                         )
 
                 # determine and set the learning rate for this iteration
-                scale_lr = get_lr(step, self.num_steps)
+                scale_lr = get_lr(step, self.num_steps, self.cooldown_frac)
                 for param_group in self.optimizer.param_groups:
                     param_group["lr"] = self.learning_rate * scale_lr
 
