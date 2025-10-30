@@ -38,7 +38,10 @@ class Solver(BaseSolver):
         'learning_rate': [1e-3],
         'weight_decay': [1e-4],
         'num_steps': [3000],
-        'batch_size': [16],
+        'batch_size': [64],
+        "slurm_gres": ["gpu:4"],
+        "slurm_gres, slurm_ntasks_per_node": [("gpu:4", 4)],
+        "slurm_nodes": [1, 2],
     }
 
     # List of packages needed to run the solver. See the corresponding
@@ -76,6 +79,11 @@ class Solver(BaseSolver):
         self.model = torch.compile(model)
         self.model.device = device  # store the device in the model
         self.train_dataloader = train_dataloader
+
+    def __del__(self):
+        # Clean up communication resources
+        if getattr(self, "dist", None) is not None:
+            self.dist.destroy_process_group()
 
     def get_next(self, stop_val):
         return stop_val + 250
