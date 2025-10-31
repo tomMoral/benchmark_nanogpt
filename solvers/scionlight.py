@@ -142,8 +142,6 @@ class ScionLight(torch.optim.Optimizer):
         )
         super().__init__(params, defaults)
 
-        self.step = torch.compile(torch.no_grad(self.step))
-
     def step(self):
         for group in self.param_groups:
             lr = group["lr"]
@@ -166,8 +164,8 @@ class ScionLight(torch.optim.Optimizer):
 
 
 # learning rate schedule: stable then decay to 0
-def get_lr(step, num_iterations, cooldown_frac=0.4):
-    x = step / num_iterations  # progress in training
+def get_lr(step, num_steps, cooldown_frac=0.4):
+    x = step / num_steps  # progress in training
     assert 0 <= x < 1
     if x < 1 - cooldown_frac:
         return 1.0
@@ -231,13 +229,18 @@ class Solver(BaseSolver):
             device = "cuda" if torch.cuda.is_available() else "cpu"
             self.dist = None
         model = model.to(device=device)
-        self.model = torch.compile(model, dynamic=False, fullgraph=True)
-        self.model.device = device  # store the device in the model
+        model.device = device  # store the device in the model
         self.train_dataloader = train_dataloader
+
+        # use mixed precision if cuda is available
         self.ctx = (
             torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
             if torch.cuda.is_available() else nullcontext()
         )
+
+        # Torch compile the model and the optimizer step function
+        self.model = torch.compile(model, dynamic=False, fullgraph=True)
+        ScionLight.step = torch.compile(torch.no_grad(ScionLight.step))
 
     def __del__(self):
         # Clean up communication resources
@@ -248,7 +251,10 @@ class Solver(BaseSolver):
         return stop_val + 250
 
     def warm_up(self):
+        n_iter = self.num_steps
+        self.num_steps = 10
         self.run_once(stop_val=10)
+        self.num_steps = n_iter
 
     def run(self, cb):
         # Configure the optimizer with different groups for transformer and
@@ -280,7 +286,7 @@ class Solver(BaseSolver):
 
         # Create ScionLight optimizer
         self.optimizer = ScionLight(
-            optim_groups, lr=self.learning_rate, momentum=self.momentum
+            optim_groups, lr=torch.tensor(self.learning_rate), momentum=self.momentum
         )
 
         train_loader = self.train_dataloader.get_distributed_data_generator(
@@ -320,7 +326,9 @@ class Solver(BaseSolver):
                 # determine and set the learning rate for this iteration
                 scale_lr = get_lr(step, self.num_steps, self.cooldown_frac)
                 for param_group in self.optimizer.param_groups:
-                    param_group["lr"] = self.learning_rate * scale_lr
+                    param_group["lr"] = torch.tensor(
+                        self.learning_rate * scale_lr
+                    )
 
                 # step the optimizer
                 # Note: ScionLight uses gradients to store the momentum,

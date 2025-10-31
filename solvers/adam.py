@@ -11,8 +11,8 @@ from torch.optim import AdamW
 
 
 # learning rate schedule: stable then decay
-def get_lr(step, num_iterations, cooldown_frac=0.4):
-    x = step / num_iterations  # progress in training
+def get_lr(step, num_step, cooldown_frac=0.4):
+    x = step / num_step  # progress in training
     assert 0 <= x < 1
     if x < 1 - cooldown_frac:
         return 1.0
@@ -75,13 +75,18 @@ class Solver(BaseSolver):
             device = "cuda" if torch.cuda.is_available() else "cpu"
             self.dist = None
         model = model.to(device=device)
-        self.model = torch.compile(model, dynamic=False, fullgraph=True)
-        self.model.device = device  # store the device in the model
+        model.device = device  # store the device in the model
         self.train_dataloader = train_dataloader
+
+        # use mixed precision if cuda is available
         self.ctx = (
             torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16)
             if torch.cuda.is_available() else nullcontext()
         )
+
+        # Torch compile the model and the optimizer step function
+        self.model = torch.compile(model, dynamic=False, fullgraph=True)
+        AdamW.step = torch.compile(torch.no_grad(AdamW.step))
 
     def __del__(self):
         # Clean up communication resources
@@ -116,7 +121,7 @@ class Solver(BaseSolver):
         # Create AdamW optimizer
         # TODO: consider using a ZeroRedundancyOptimizer
         self.optimizer = AdamW(
-            optim_groups, lr=self.learning_rate, betas=(0.9, 0.95), fused=True
+            optim_groups, lr=torch.tensor(self.learning_rate), betas=(0.9, 0.95), fused=True
         )
 
         train_loader = self.train_dataloader.get_distributed_data_generator(
@@ -150,7 +155,9 @@ class Solver(BaseSolver):
                 # determine and set the learning rate for this iteration
                 scale_lr = get_lr(step, self.num_steps)
                 for param_group in self.optimizer.param_groups:
-                    param_group['lr'] = self.learning_rate * scale_lr
+                    param_group['lr'] = torch.tensor(
+                        self.learning_rate * scale_lr
+                    )
                 # step the self.optimizer
                 self.optimizer.step()
 
