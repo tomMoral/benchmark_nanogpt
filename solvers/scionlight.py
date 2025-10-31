@@ -286,7 +286,9 @@ class Solver(BaseSolver):
 
         # Create ScionLight optimizer
         self.optimizer = ScionLight(
-            optim_groups, lr=torch.tensor(self.learning_rate), momentum=self.momentum
+            optim_groups,
+            lr=torch.tensor(self.learning_rate),
+            momentum=self.momentum
         )
 
         train_loader = self.train_dataloader.get_distributed_data_generator(

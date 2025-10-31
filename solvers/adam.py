@@ -121,7 +121,10 @@ class Solver(BaseSolver):
         # Create AdamW optimizer
         # TODO: consider using a ZeroRedundancyOptimizer
         self.optimizer = AdamW(
-            optim_groups, lr=torch.tensor(self.learning_rate), betas=(0.9, 0.95), fused=True
+            optim_groups,
+            lr=torch.tensor(self.learning_rate),
+            betas=(0.9, 0.95),
+            fused=True
         )
 
         train_loader = self.train_dataloader.get_distributed_data_generator(
