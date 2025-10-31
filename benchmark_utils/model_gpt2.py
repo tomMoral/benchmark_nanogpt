@@ -30,37 +30,66 @@ class NewGELU(nn.Module):
         ))
 
 
+class Rotary(nn.Module):
+    def __init__(self, dim: int, max_seq_len: int):
+        super().__init__()
+        # half-truncate RoPE by @YouJiacheng (w/ base freq tuning)
+        exponent = torch.linspace(0, 1, steps=dim//4, dtype=torch.float32)
+        angular_freq = (1 / max_seq_len) ** exponent
+        angular_freq = torch.cat(
+            [angular_freq, angular_freq.new_zeros(dim//4)]
+        )
+        t = torch.arange(max_seq_len, dtype=torch.float32)
+        theta = torch.einsum("i,j -> ij", t, angular_freq)
+
+        # save the embeddings in buffers so they are moved to the GPU
+        # automatically but don't save them in the model state_dict
+        self.cos = nn.Buffer(theta.cos(), persistent=False)
+        self.sin = nn.Buffer(theta.sin(), persistent=False)
+
+    def forward(self, x_BTHD):
+        assert self.cos.size(0) >= x_BTHD.size(-3)
+        cos = self.cos[None, :x_BTHD.size(-3), None, :]
+        sin = self.sin[None, :x_BTHD.size(-3), None, :]
+        x1, x2 = x_BTHD.to(dtype=torch.float32).chunk(2, dim=-1)
+        y1 = x1 * cos + x2 * sin
+        y2 = x1 * (-sin) + x2 * cos
+        return torch.cat((y1, y2), 3).type_as(x_BTHD)
+
+
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
         super().__init__()
         assert config.n_embd % config.n_head == 0
-        # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
-        # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
-        # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
-        # not really a 'bias', more of a mask
-        # but following the OpenAI/HF naming though
-        self.register_buffer(
-            "bias",
-            torch.tril(torch.ones(config.block_size, config.block_size))
-            .view(1, 1, config.block_size, config.block_size)
+        self.d_embd = config.n_embd // config.n_head
+        # key, query, value projections for all heads, but in a batch
+        self.c_attn = nn.Linear(
+            config.n_embd, 3 * config.n_embd, bias=False
         )
+        self.rotary = Rotary(self.d_embd, config.block_size)
+        self.norm = nn.RMSNorm((self.d_embd,))
+
+        # output projection
+        self.c_proj = nn.Linear(
+            config.n_embd, config.n_embd, bias=False
+        )
+        self.c_proj.INIT_ZERO = 1
 
     def forward(self, x):
         B, T, C = x.size()  # batch size, sequence length, n_embd
         # calculate query, key, values for all heads in batch
         # and move head forward to be the batch dim
         qkv = self.c_attn(x)
-        q, k, v = qkv.split(self.n_embd, dim=2)
+        q, k, v = qkv.chunk(3, dim=2)
         # Reshape q, k, v for multi-head attention with shape (B, nh, T, hs)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+        q, k = self.norm(q), self.norm(k)  # QK norm @Grad62304977
+        q, k = self.rotary(q), self.rotary(k)  # Rotarty Positional Embedding
 
         # TODO: use the flex attention from torch.nn.attention.flex_attention?
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
@@ -78,7 +107,7 @@ class MLP(nn.Module):
         self.c_fc = nn.Linear(n_embd, 4 * n_embd)
         self.gelu = NewGELU()
         self.c_proj = nn.Linear(4 * n_embd, n_embd)
-        self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
+        self.c_proj.INIT_ZERO = 1
 
     def forward(self, x):
         x = self.c_fc(x)
@@ -130,7 +159,7 @@ class GPT(nn.Module):
         # For the lm_head, we use tied weigths with the transformer.wte
         # See https://paperswithcode.com/method/weight-tying
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        self.lm_head.LLMC_SKIP_INIT = True
+        self.lm_head.SKIP_INIT = True
         self.transformer.wte.weight = self.lm_head.weight
 
         # init all weights, use a torch rng object to be very careful
@@ -145,15 +174,13 @@ class GPT(nn.Module):
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
-            # apply special scaled init to the residual projections,
-            # per GPT-2 paper
-            std = (
-                0.02 if not hasattr(module, 'LLMC_RESIDUAL_SCALE_FLAG')
-                else 0.02/math.sqrt(2 * self.config.n_layer)
-            )
-            # we want to skip initializing lm_head, which shares parameters
-            # with wte initialized below during the Embedding's init
-            if not hasattr(module, 'LLMC_SKIP_INIT'):
+            if hasattr(module, 'INIT_ZERO'):
+                # this is a residual projection, initialize to zero
+                torch.nn.init.zeros_(module.weight)
+            elif not hasattr(module, 'SKIP_INIT'):
+                # we want to skip initializing lm_head, which shares parameters
+                # with wte initialized below during the Embedding's init
+                std = 0.02 / math.sqrt(2 * self.config.n_layer)
                 torch.nn.init.normal_(
                     module.weight, mean=0.0, std=std, generator=self.init_rng
                 )

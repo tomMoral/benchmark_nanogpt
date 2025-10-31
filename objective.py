@@ -21,7 +21,7 @@ class Objective(BaseObjective):
 
     # Minimal version of benchopt required to run this benchmark.
     # Bump it up if the benchmark depends on a new feature of benchopt.
-    min_benchopt_version = "1.7"
+    min_benchopt_version = "1.8"
 
     def set_data(self, train_dataloader, val_dataloader, model):
         self.train_dataloader = train_dataloader
@@ -72,11 +72,7 @@ class Objective(BaseObjective):
         return dict(model=self.model)
 
     def get_objective(self):
-        # Define the information to pass to each solver to run the benchmark.
-        # The output of this function are the keyword arguments
-        # for `Solver.set_objective`. This defines the
-        # benchmark's API for passing the objective to the solver.
-        # It is customizable for each benchmark.
+        # Send the train dataloader and model to the solver.
         return dict(
             train_dataloader=self.train_dataloader,
             model=self.model,

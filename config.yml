@@ -1,0 +1,12 @@
+plot_configs:
+  Convergence:
+    objective_curve_dataset: Fine-web[debug=False,n_chunks=4]
+    objective_curve_objective: Deep Learning Optimization with NanoGPT
+    objective_curve_objective_column: objective_value
+    objective_curve_X_axis: Time
+    plot_kind: objective_curve
+    hidden_curves: 
+    scale: loglog
+    with_quantiles: true
+    suboptimal_curve: true
+    relative_curve: false
