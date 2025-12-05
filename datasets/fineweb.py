@@ -47,15 +47,20 @@ class DistributedDataLoader:
     def __init__(self, filename_pattern, max_tokens=None):
         self.filename_pattern = filename_pattern
         self.max_tokens = max_tokens
+        self.seq_len = 1024
 
     def get_distributed_data_generator(self, batch_size, rank=0, world_size=1):
         files = [
             Path(file) for file in sorted(glob.glob(self.filename_pattern))
         ]
-        assert batch_size % world_size == 0
+        effective_batch_size = batch_size * world_size * self.seq_len
         if self.max_tokens is not None:
-            assert self.max_tokens % batch_size == 0
-        local_batch_size = batch_size // world_size
+            assert self.max_tokens % effective_batch_size == 0
+
+        # Compute local batch size per process
+        # We use sequence length 1024 and load the token stream as a flat array
+        local_batch_size = batch_size * self.seq_len
+
         # use itertools.cycle(files) for multi-epoch training
         file_iter = iter(files)
         tokens, pos = _load_data_shard(next(file_iter)), 0
@@ -67,15 +72,21 @@ class DistributedDataLoader:
         if self.max_tokens is not None:
             progress = tqdm(total=self.max_tokens, desc="Validation")
         while True:
-            if pos + batch_size + 1 >= len(tokens):
+            if pos + effective_batch_size + 1 >= len(tokens):
                 tokens, pos = _load_data_shard(next(file_iter)), 0
             buf = tokens[pos + rank * local_batch_size:][:local_batch_size + 1]
             # no sync on host side;
-            inputs = buf[:-1].to(dtype=torch.int32, **cuda_args).view(-1, 1024)
-            targets = buf[1:].to(dtype=torch.int64, **cuda_args).view(-1, 1024)
-            pos += batch_size
+            inputs = (
+                buf[:-1].to(dtype=torch.int32, **cuda_args)
+                .view(-1, self.seq_len)
+            )
+            targets = (
+                buf[1:].to(dtype=torch.int64, **cuda_args)
+                .view(-1, self.seq_len)
+            )
+            pos += effective_batch_size
             if self.max_tokens is not None:
-                progress.update(batch_size)
+                progress.update(effective_batch_size)
             yield inputs, targets
             if self.max_tokens is not None:
                 if pos >= self.max_tokens:
