@@ -292,9 +292,9 @@ class Solver(BaseSolver):
         )
 
         train_loader = self.train_dataloader.get_distributed_data_generator(
-            batch_size=self.batch_size * 1024 * self.world_size,
-            rank=self.rank,
+            batch_size=self.batch_size,
             world_size=self.world_size,
+            rank=self.rank,
         )
 
         if self.dist is not None:
