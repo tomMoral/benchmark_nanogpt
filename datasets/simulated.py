@@ -1,11 +1,7 @@
-from benchopt import BaseDataset, safe_import_context
+import torch
+from benchopt import BaseDataset
 
-
-# Protect the import with `safe_import_context()`. This allows:
-# - skipping import to speed up autocompletion in CLI.
-# - getting requirements info when all dependencies are not installed.
-with safe_import_context() as import_ctx:
-    import torch
+from benchmark_utils.sin_init import sinusoidal_
 
 
 class DataLoader:
@@ -24,6 +20,16 @@ class DataLoader:
             yield self.X,
 
 
+def initialize_weights(module, sin_init=False, seed=42):
+    init_rng = torch.Generator()
+    init_rng.manual_seed(seed)
+    init_ = sinusoidal_ if sin_init else torch.nn.init.normal_
+    if isinstance(module, torch.nn.Linear):
+        init_(module.weight, mean=0.0, std=0.02, generator=init_rng)
+        if module.bias is not None:
+            torch.nn.init.zeros_(module.bias)
+
+
 # All datasets must be named `Dataset` and inherit from `BaseDataset`
 class Dataset(BaseDataset):
 
@@ -33,6 +39,11 @@ class Dataset(BaseDataset):
     def get_data(self):
 
         model = torch.nn.Linear(10, 1)
+        model.initialize_weights = (
+            lambda sin_init, seed: initialize_weights(
+                model, sin_init=sin_init, seed=seed
+            )
+        )
 
         # The dictionary defines the keyword arguments for `Objective.set_data`
         return dict(

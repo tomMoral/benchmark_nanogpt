@@ -97,7 +97,7 @@ class Dataset(BaseDataset):
 
     name = "Fine-web"
     parameters = {
-        'n_chunks': [4],
+        'n_chunks': [40],
         'debug': [False]
     }
 
