@@ -5,20 +5,19 @@ Benchmarking deep learning optimization with nanoGPT
 
 This benchmark is dedicated to evaluate new deep learning optimization methods
 on the nanoGPT architecture.
-The optimization problem is defined as in the original speedrun of nanoGPT (see [here](https://github.com/KellerJordan/modded-nanogpt)):
-   - The training and validation is perfromed on [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) -- Do not change the dataloaders.
-   - The training is stopped once the validation loss is below ``3.28``.
+The optimization problem is defined as in the original speedrun of nanoGPT (see `modded nanogpt`_):
+
+- The training and validation is perfromed on `FineWeb`_ -- Do not change the dataloaders.
+- The training is stopped once the validation loss is below ``3.28``. (Still todo)
 
 
 For now, the repository contains a single solver, Adam, and run on CPU.
 The dataloaders are working but with fixed sequence length of 128 tokens.
-We used the original code from nanoGPT ([GPT2 from llm.c](https://github.com/karpathy/llm.c)), but use the simple dataloader from [modded-nanogpt](https://github.com/KellerJordan/modded-nanogpt).
+We used the original code from nanoGPT (`GPT2 from llm.c`_), but use the simple dataloader from `modded-nanogpt`_.
 
 TODO:
 
-- Make it run on 1 GPU and multiple ones.
 - Tweak the dataloaders to make it more efficient/less error prone.
-- See how to add a new optimizer with limited code.
 - See if we want to add imporevments to the architecture (QK-norm, Rotary embeddings, etc.).
 
 Install
@@ -45,3 +44,7 @@ Use ``benchopt run -h`` for more details about these options, or visit https://b
    :target: https://github.com/tomMoral/benchmark_nanogpt/actions
 .. |Python 3.10+| image:: https://img.shields.io/badge/python-3.10%2B-blue
    :target: https://www.python.org/downloads/release/python-3100/
+
+.. _FineWeb: https://huggingface.co/datasets/HuggingFaceFW/fineweb
+.. _modded nanogpt: https://github.com/KellerJordan/modded-nanogpt
+.. _GPT2 from llm.c: https://github.com/karpathy/llm.c
