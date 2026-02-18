@@ -1,10 +1,6 @@
-from benchopt import BaseObjective, safe_import_context
+from benchopt import BaseObjective
 
-# Protect the import with `safe_import_context()`. This allows:
-# - skipping import to speed up autocompletion in CLI.
-# - getting requirements info when all dependencies are not installed.
-with safe_import_context() as import_ctx:
-    import torch
+import torch
 
 
 # The benchmark objective must be named `Objective` and
