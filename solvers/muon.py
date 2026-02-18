@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 
 
 def zeropower_via_newtonschulz5(G, steps=5):
-    """Newton-Schulz iteration to compute the zeroth power / orthogonalize G."""
+    """Newton-Schulz iteration to compute the zeroth power/orthogonalize G."""
     assert len(G.shape) == 2
     a, b, c = (3.4445, -4.7750, 2.0315)
     X = G.bfloat16()
