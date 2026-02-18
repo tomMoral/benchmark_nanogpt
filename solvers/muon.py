@@ -1,22 +1,18 @@
-from benchopt import BaseSolver
-
 from contextlib import nullcontext
 
 import torch
+from benchmark_utils.distributed_tools import setup_distributed
+from benchmark_utils.lr_scheduler import get_lr
+from benchopt import BaseSolver
 from torch.optim import AdamW
 from tqdm.auto import tqdm
-
-from benchmark_utils.lr_scheduler import get_lr
-from benchmark_utils.distributed_tools import setup_distributed
-
 
 # -----------------------------------------------------------------------------
 # Muon optimizer implementation
 
 
 def zeropower_via_newtonschulz5(G, steps=5):
-    """Newton-Schulz iteration to compute the zeroth power / orthogonalize G.
-    """
+    """Newton-Schulz iteration to compute the zeroth power / orthogonalize G."""
     assert len(G.shape) == 2
     a, b, c = (3.4445, -4.7750, 2.0315)
     X = G.bfloat16()
@@ -52,12 +48,10 @@ class Muon(torch.optim.Optimizer):
         ns_steps: Number of Newton-Schulz iteration steps (default: 5).
     """
 
-    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True,
-                 ns_steps=5):
+    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
-        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov,
-                        ns_steps=ns_steps)
+        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
         super().__init__(params, defaults)
         # Compile Newton-Schulz at init time (class-level to avoid
         # recompilation across param groups).
@@ -86,7 +80,7 @@ class Muon(torch.optim.Optimizer):
                 # "fan-in" dimension, matching the convention from
                 # modded-nanogpt.
                 d_out, d_in = g.shape[0], g[0].numel()
-                g_orth = g_orth * (d_out / d_in) ** 0.5
+                g_orth = g_orth * max(1, (d_out / d_in) ** 0.5)
 
                 state = self.state[p]
                 if "momentum_buffer" not in state:
@@ -131,7 +125,8 @@ class Solver(BaseSolver):
 
         self.ctx = (
             torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
-            if torch.cuda.is_available() else nullcontext()
+            if torch.cuda.is_available()
+            else nullcontext()
         )
 
         self.model = torch.compile(model, dynamic=False, fullgraph=True)
@@ -163,8 +158,12 @@ class Solver(BaseSolver):
                 continue
             # Embeddings and lm_head go to AdamW, everything else 2D goes
             # to Muon.
-            if param.dim() >= 2 and "wte" not in name and "wpe" not in name \
-                    and "lm_head" not in name:
+            if (
+                param.dim() >= 2
+                and "wte" not in name
+                and "wpe" not in name
+                and "lm_head" not in name
+            ):
                 muon_params.append(param)
             elif param.dim() >= 2:
                 adam_decay_params.append(param)
@@ -179,8 +178,7 @@ class Solver(BaseSolver):
 
         self.adam_optimizer = AdamW(
             [
-                {"params": adam_decay_params,
-                 "weight_decay": self.adam_weight_decay},
+                {"params": adam_decay_params, "weight_decay": self.adam_weight_decay},
                 {"params": adam_nodecay_params, "weight_decay": 0.0},
             ],
             lr=torch.tensor(self.adam_lr),
@@ -216,20 +214,14 @@ class Solver(BaseSolver):
 
                 if self.dist is not None:
                     for param in self.model.parameters():
-                        self.dist.all_reduce(
-                            param.grad, op=self.dist.ReduceOp.AVG
-                        )
+                        self.dist.all_reduce(param.grad, op=self.dist.ReduceOp.AVG)
 
                 # Scale learning rates with the schedule
                 scale_lr = get_lr(step, self.num_steps)
                 for param_group in self.muon_optimizer.param_groups:
-                    param_group["lr"] = torch.tensor(
-                        self.muon_lr * scale_lr
-                    )
+                    param_group["lr"] = torch.tensor(self.muon_lr * scale_lr)
                 for param_group in self.adam_optimizer.param_groups:
-                    param_group["lr"] = torch.tensor(
-                        self.adam_lr * scale_lr
-                    )
+                    param_group["lr"] = torch.tensor(self.adam_lr * scale_lr)
 
                 self.muon_optimizer.step()
                 self.adam_optimizer.step()
