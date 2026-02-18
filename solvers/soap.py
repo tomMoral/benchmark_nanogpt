@@ -6,7 +6,7 @@ from tqdm.auto import tqdm
 
 import torch
 
-from benchmark_utils.soap import SOAP
+from benchmark_utils.optimizers.soap import SOAP
 from benchmark_utils.lr_scheduler import get_lr
 from benchmark_utils.distributed_tools import setup_distributed
 

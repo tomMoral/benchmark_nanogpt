@@ -3,7 +3,7 @@ from contextlib import nullcontext
 import torch
 from benchmark_utils.distributed_tools import setup_distributed
 from benchmark_utils.lr_scheduler import get_lr
-from benchmark_utils.muon import Muon
+from benchmark_utils.optimizers.muon import Muon
 from benchopt import BaseSolver
 from torch.optim import AdamW
 from tqdm.auto import tqdm
