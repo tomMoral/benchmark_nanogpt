@@ -1,3 +1,4 @@
+# flake8: noqa
 # Muon optimizer implementation
 import torch
 
@@ -39,10 +40,14 @@ class Muon(torch.optim.Optimizer):
         ns_steps: Number of Newton-Schulz iteration steps (default: 5).
     """
 
-    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5):
+    def __init__(
+            self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5
+    ):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
-        defaults = dict(lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps)
+        defaults = dict(
+            lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps
+        )
         super().__init__(params, defaults)
         # Compile Newton-Schulz at init time (class-level to avoid
         # recompilation across param groups).

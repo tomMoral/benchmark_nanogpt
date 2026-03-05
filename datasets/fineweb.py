@@ -99,7 +99,7 @@ class Dataset(BaseDataset):
 
     name = "Fine-web"
     parameters = {
-        'n_chunks': [40],
+        'n_chunks': [104],
         'debug': [False]
     }
 
@@ -120,7 +120,7 @@ class Dataset(BaseDataset):
 
         # from scratch (random weights)
         config = GPTConfig(
-            vocab_size=50257, n_layer=12, n_head=6, n_embd=768,
+            vocab_size=50304, n_layer=12, n_head=12, n_embd=768,
             # max_seq_len=4*64*1024 - This is for Rotary Positional Embedding
         )
         model = GPT(config)

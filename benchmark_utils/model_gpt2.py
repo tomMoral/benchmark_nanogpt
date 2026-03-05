@@ -21,14 +21,6 @@ from torch.nn import functional as F
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the GPT-2 model
 
-class NewGELU(nn.Module):
-    """Versions of GeLU used by OpenAI"""
-    def forward(self, input):
-        return 0.5 * input * (1.0 + torch.tanh(
-            math.sqrt(2.0 / math.pi)
-            * (input + 0.044715 * torch.pow(input, 3.0))
-        ))
-
 
 class CausalSelfAttention(nn.Module):
 
@@ -36,20 +28,13 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
-        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd)
+        self.c_attn = nn.Linear(config.n_embd, 3 * config.n_embd, bias=False)
         # output projection
-        self.c_proj = nn.Linear(config.n_embd, config.n_embd)
+        self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
         self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
         # regularization
         self.n_head = config.n_head
         self.n_embd = config.n_embd
-        # not really a 'bias', more of a mask
-        # but following the OpenAI/HF naming though
-        self.register_buffer(
-            "bias",
-            torch.tril(torch.ones(config.block_size, config.block_size))
-            .view(1, 1, config.block_size, config.block_size)
-        )
 
     def forward(self, x):
         B, T, C = x.size()  # batch size, sequence length, n_embd
@@ -75,14 +60,13 @@ class MLP(nn.Module):
 
     def __init__(self, n_embd):
         super().__init__()
-        self.c_fc = nn.Linear(n_embd, 4 * n_embd)
-        self.gelu = NewGELU()
-        self.c_proj = nn.Linear(4 * n_embd, n_embd)
+        self.c_fc = nn.Linear(n_embd, 4 * n_embd, bias=False)
+        self.c_proj = nn.Linear(4 * n_embd, n_embd, bias=False)
         self.c_proj.LLMC_RESIDUAL_SCALE_FLAG = 1
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = self.gelu(x)
+        x = F.gelu(x)
         x = self.c_proj(x)
         return x
 
@@ -91,9 +75,9 @@ class Block(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.ln_1 = nn.LayerNorm(config.n_embd)
+        self.ln_1 = nn.LayerNorm(config.n_embd, bias=False)
         self.attn = CausalSelfAttention(config)
-        self.ln_2 = nn.LayerNorm(config.n_embd)
+        self.ln_2 = nn.LayerNorm(config.n_embd, bias=False)
         self.mlp = MLP(config.n_embd)
 
     def forward(self, x):
@@ -108,7 +92,7 @@ class Block(nn.Module):
 @dataclass
 class GPTConfig:
     block_size: int = 1024
-    vocab_size: int = 50257
+    vocab_size: int = 50304
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
@@ -191,7 +175,7 @@ class GPT(nn.Module):
 
         if targets is not None:
             # if we are given some desired targets also calculate the loss
-            logits = self.lm_head(x)
+            logits = self.lm_head(x).float()
             loss = F.cross_entropy(
                 logits.view(-1, logits.size(-1)), targets.view(-1),
                 ignore_index=-1
