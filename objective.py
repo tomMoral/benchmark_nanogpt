@@ -26,7 +26,7 @@ class Objective(BaseObjective):
 
     def evaluate_result(self, model, dist=None):
         model.eval()
-        val_batch_size = 64  # Batch of 64 for validation
+        val_batch_size = 64  # Batch 64 for validation as in NanoGPT codebase
         if dist is not None:
             # In distributed mode, we use the distributed data generator
             rank, size = dist.get_rank(), dist.get_world_size()
@@ -43,7 +43,7 @@ class Objective(BaseObjective):
             # Compute the validation loss
             val_loss, n_batches = 0.0, 0
             for data in val_loader:
-                loss, *_ = self.model(*data)
+                loss, *_ = model(*data)
                 val_loss += loss.item()
                 n_batches += 1
             val_loss /= n_batches

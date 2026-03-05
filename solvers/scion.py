@@ -24,7 +24,7 @@ class Solver(BaseSolver):
         "momentum": [0.1],
         "hidden_radius": [50.0],
         "lm_head_radius": [3000.0],
-        "num_steps": [6200],
+        "num_steps": [8_000],
         "batch_size": [64],
         "slurm_nodes": [1, 2],
     }

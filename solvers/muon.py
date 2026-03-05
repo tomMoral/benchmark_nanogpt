@@ -1,10 +1,10 @@
+from benchopt import BaseSolver
 from contextlib import nullcontext
 
 import torch
 from benchmark_utils.distributed_tools import setup_distributed
 from benchmark_utils.lr_scheduler import get_lr
 from benchmark_utils.optimizers.muon import Muon
-from benchopt import BaseSolver
 from torch.optim import AdamW
 from tqdm.auto import tqdm
 
@@ -13,11 +13,11 @@ class Solver(BaseSolver):
     name = "Muon"
 
     parameters = {
-        "muon_lr": [0.02],
+        "muon_lr": [3.6e-4],
         "muon_momentum": [0.95],
-        "adam_lr": [3e-4],
-        "adam_weight_decay": [0.0],
-        "num_steps": [6200],
+        "adam_lr": [0.0036],
+        "adam_weight_decay": [1e-4],
+        "num_steps": [8_000],
         "batch_size": [64],
         "slurm_nodes": [1, 2],
     }

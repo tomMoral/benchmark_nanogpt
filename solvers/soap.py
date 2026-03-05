@@ -15,9 +15,9 @@ class Solver(BaseSolver):
     name = "SOAP"
 
     parameters = {
-        "learning_rate": [3e-3],
+        "learning_rate": [0.0036],
         "weight_decay": [1e-4],
-        "num_steps": [6200],
+        "num_steps": [7_500],
         "batch_size": [64],
         "slurm_nodes": [1, 2],
     }
@@ -53,7 +53,10 @@ class Solver(BaseSolver):
         return stop_val + 250
 
     def warm_up(self):
+        n_iter = self.num_steps
+        self.num_steps = 10
         self.run_once(stop_val=10)
+        self.num_steps = n_iter
 
     def run(self, cb):
         param_dict = {
