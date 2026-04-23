@@ -253,13 +253,17 @@ class ShampooPreconditioner:
             dtypes.append(preconditioner.dtype)
             devices.append(preconditioner.device)
 
-        orig_shape = state["exp_avg_sq"].shape
-        if self._data_format == "channels_last" and len(orig_shape) == 4:
-            permuted_shape = state["exp_avg_sq"].permute(0, 3, 1, 2).shape
-        if merge_dims:
-            exp_avg_sq = self.merge_dims(state["exp_avg_sq"], max_precond_dim)
-        else:
-            exp_avg_sq = state["exp_avg_sq"]
+        has_exp_avg_sq = "exp_avg_sq" in state
+        if has_exp_avg_sq:
+            orig_shape = state["exp_avg_sq"].shape
+            if self._data_format == "channels_last" and len(orig_shape) == 4:
+                permuted_shape = state["exp_avg_sq"].permute(0, 3, 1, 2).shape
+            if merge_dims:
+                exp_avg_sq = self.merge_dims(
+                    state["exp_avg_sq"], max_precond_dim
+                )
+            else:
+                exp_avg_sq = state["exp_avg_sq"]
 
         bases = []
         eigenvalues = []
@@ -270,7 +274,8 @@ class ShampooPreconditioner:
                 continue
             estimated_eigenvalues = torch.diag(basis_i.T @ matrix_i @ basis_i)
             sort_idx = torch.argsort(estimated_eigenvalues, descending=True)
-            exp_avg_sq = exp_avg_sq.index_select(ind, sort_idx)
+            if has_exp_avg_sq:
+                exp_avg_sq = exp_avg_sq.index_select(ind, sort_idx)
             basis_i = basis_i[:, sort_idx]
             power_iter = matrix_i @ basis_i
             refreshed_basis, _ = torch.linalg.qr(power_iter)
@@ -283,13 +288,16 @@ class ShampooPreconditioner:
             )
             eigenvalues.append(refreshed_eigenvalues.to(devices[ind]))
 
-        if merge_dims:
-            if self._data_format == "channels_last" and len(orig_shape) == 4:
-                exp_avg_sq = exp_avg_sq.reshape(permuted_shape).permute(0, 2, 3, 1)
-            else:
-                exp_avg_sq = exp_avg_sq.reshape(orig_shape)
+        if has_exp_avg_sq:
+            if merge_dims:
+                if self._data_format == "channels_last" and len(orig_shape) == 4:
+                    exp_avg_sq = exp_avg_sq.reshape(permuted_shape).permute(
+                        0, 2, 3, 1
+                    )
+                else:
+                    exp_avg_sq = exp_avg_sq.reshape(orig_shape)
 
-        state["exp_avg_sq"] = exp_avg_sq
+            state["exp_avg_sq"] = exp_avg_sq
         return bases, eigenvalues
 
     def precondition(self, grad, state, eps=1e-12, merge_dims=False, max_precond_dim=10000):

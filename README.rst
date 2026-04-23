@@ -11,8 +11,9 @@ The optimization problem is defined as in the original speedrun of nanoGPT (see 
 - The training is stopped once the validation loss is below ``3.28``. (Still todo)
 
 
-For now, the repository contains a single solver, Adam, and run on CPU.
-The dataloaders are working but with fixed sequence length of 128 tokens.
+The benchmark currently includes Adam, Muon, Scion, SOAP, and Shampoo
+solvers. Shared optimizer math now lives under ``benchmark_utils/optimizers``.
+The dataloaders are working with a fixed sequence length of 1024 tokens.
 We used the original code from nanoGPT (`GPT2 from llm.c`_), but use the simple dataloader from `modded-nanogpt`_.
 
 TODO:
