@@ -1,27 +1,8 @@
-# Scion optimizer implementation
 import torch
 
-
-def zeropower_via_newtonschulz5(G, steps=5):
-    """Newton-Schulz iteration to compute the 0-th power/orthogonalize G.
-    """
-    assert len(G.shape) == 2
-    a, b, c = (3.4445, -4.7750, 2.0315)
-    X = G.bfloat16()
-    if G.size(0) > G.size(1):
-        X = X.T
-
-    # Ensure spectral norm is at most 1
-    X = X / (X.norm() + 1e-7)
-    # Perform the NS iterations
-    for _ in range(steps):
-        A = X @ X.T
-        B = b * A + c * A @ A
-        X = a * X + B @ X
-
-    if G.size(0) > G.size(1):
-        X = X.T
-    return X
+from benchmark_utils.optimizers.orthogonalization import (
+    zeropower_via_polar_express,
+)
 
 
 class Norm(object):
@@ -30,21 +11,18 @@ class Norm(object):
 
 
 class Spectral(Norm):
-    newton_schultz5 = None
+    _compiled_orthogonalize = None
 
-    def __init__(self, steps=5):
-        self.steps = steps
-        # need to compile only at runtime to avoid issues with distributed
-        # training setup. Using a class attribute to avoid recompiling for
-        # each instantiation.
-        if self.newton_schultz5 is None:
-            self.newton_schultz5 = torch.compile(zeropower_via_newtonschulz5)
+    def __init__(self):
+        if Spectral._compiled_orthogonalize is None:
+            Spectral._compiled_orthogonalize = torch.compile(
+                zeropower_via_polar_express
+            )
 
     def lmo(self, g):
-        g = self.newton_schultz5(g.reshape(len(g), -1), steps=self.steps).view(
-            g.shape
-        )
-        d_out, d_in = g.shape
+        g_matrix = g.reshape(len(g), -1)
+        g = Spectral._compiled_orthogonalize(g_matrix).view(g.shape)
+        d_out, d_in = g_matrix.shape
         g *= (d_out / d_in) ** 0.5
         return g
 
