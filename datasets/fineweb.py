@@ -119,9 +119,10 @@ class Dataset(BaseDataset):
         download_data(data_dir, n_chunks=self.n_chunks)
 
         # from scratch (random weights)
+        # vocab_size 50257 matches the reference modded-nanogpt
+        # 844e5fdb2334ff83324e6f1f900ce443dd9e1226 config (real GPT-2 vocab).
         config = GPTConfig(
-            vocab_size=50304, n_layer=12, n_head=12, n_embd=768,
-            # max_seq_len=4*64*1024 - This is for Rotary Positional Embedding
+            vocab_size=50257, n_layer=12, n_head=12, n_embd=768,
         )
         model = GPT(config)
 

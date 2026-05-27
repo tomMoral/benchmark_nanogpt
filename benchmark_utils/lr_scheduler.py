@@ -8,3 +8,16 @@ def get_lr(step, num_step, cooldown_frac=0.4):
     else:
         return (1 - x) / cooldown_frac
         # return w * 1.0 + (1 - w) * 0.1
+
+
+def get_lr_trapezoidal(step, num_step, warmup_iters=256, warmdown_iters=2048):
+    """Trapezoidal schedule from modded-nanogpt 844e5fd.
+
+    Linear warmup, constant plateau, then linear warmdown to zero.
+    Returns a multiplier in [0, 1] applied to the base learning rate.
+    """
+    if step < warmup_iters:
+        return (step + 1) / warmup_iters
+    if step < num_step - warmdown_iters:
+        return 1.0
+    return max(0.0, (num_step - step) / warmdown_iters)

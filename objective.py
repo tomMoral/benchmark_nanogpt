@@ -26,7 +26,9 @@ class Objective(BaseObjective):
 
     def evaluate_result(self, model, dist=None):
         model.eval()
-        val_batch_size = 64  # Batch of 64 for validation
+        # Batch size kept small so eval fits on a single 24GB GPU alongside
+        # the training optimizer state. Increase on bigger hardware.
+        val_batch_size = 16
         if dist is not None:
             # In distributed mode, we use the distributed data generator
             rank, size = dist.get_rank(), dist.get_world_size()

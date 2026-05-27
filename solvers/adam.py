@@ -6,7 +6,7 @@ import torch
 from torch.optim import AdamW
 from tqdm.auto import tqdm
 
-from benchmark_utils.lr_scheduler import get_lr
+from benchmark_utils.lr_scheduler import get_lr_trapezoidal
 from benchmark_utils.distributed_tools import setup_distributed
 
 
@@ -14,13 +14,26 @@ class Solver(BaseSolver):
 
     name = 'Adam'
 
+    # Defaults follow modded-nanogpt commit
+    # 844e5fdb2334ff83324e6f1f900ce443dd9e1226 (run.sh):
+    # lr=0.0018, betas=(0.9, 0.98), wd=0.1 (kept here because we use AdamW;
+    # the reference passes wd to its custom Adam which then ignores it),
+    # 9536 iterations with 256 warmup / 2048 warmdown, batch_size=64,
+    # sequence_length=1024 over 8 GPUs (=> global batch = 512).
+    #
+    # On a single 24 GB GPU we cannot afford batch_size=64 per step with
+    # the 124M model. We keep the effective dataloader batch low and rely
+    # on the trapezoidal schedule to converge — runtime, not loss target,
+    # is what changes when reducing batch size.
     parameters = {
-        'learning_rate': [1e-3],
-        'weight_decay': [1e-4],
-        'num_steps': [6200],
-        'batch_size': [64],
+        'learning_rate': [1.8e-3],
+        'weight_decay': [0.1],
+        'num_steps': [9536],
+        'batch_size': [16],
+        'warmup_iters': [256],
+        'warmdown_iters': [2048],
         "slurm_nodes": [1, 2],
-        "sin_init": [True],
+        "sin_init": [False],
     }
     slurm_params = {
         "slurm_gres": "gpu:4",
@@ -84,12 +97,11 @@ class Solver(BaseSolver):
             {'params': nodecay_params, 'weight_decay': 0.0}
         ]
 
-        # Create AdamW optimizer
-        # TODO: consider using a ZeroRedundancyOptimizer
+        # Create AdamW optimizer. Betas (0.9, 0.98) match the reference.
         self.optimizer = AdamW(
             optim_groups,
             lr=torch.tensor(self.learning_rate),
-            betas=(0.9, 0.95),
+            betas=(0.9, 0.98),
             fused=True
         )
 
@@ -123,7 +135,11 @@ class Solver(BaseSolver):
                         )
 
                 # determine and set the learning rate for this iteration
-                scale_lr = get_lr(step, self.num_steps)
+                scale_lr = get_lr_trapezoidal(
+                    step, self.num_steps,
+                    warmup_iters=self.warmup_iters,
+                    warmdown_iters=self.warmdown_iters,
+                )
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = torch.tensor(
                         self.learning_rate * scale_lr
