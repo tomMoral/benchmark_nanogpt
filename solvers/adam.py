@@ -20,16 +20,11 @@ class Solver(BaseSolver):
     # the reference passes wd to its custom Adam which then ignores it),
     # 9536 iterations with 256 warmup / 2048 warmdown, batch_size=64,
     # sequence_length=1024 over 8 GPUs (=> global batch = 512).
-    #
-    # On a single 24 GB GPU we cannot afford batch_size=64 per step with
-    # the 124M model. We keep the effective dataloader batch low and rely
-    # on the trapezoidal schedule to converge — runtime, not loss target,
-    # is what changes when reducing batch size.
     parameters = {
         'learning_rate': [1.8e-3],
         'weight_decay': [0.1],
         'num_steps': [9536],
-        'batch_size': [16],
+        'batch_size': [64],
         'warmup_iters': [256],
         'warmdown_iters': [2048],
         "slurm_nodes": [1, 2],
