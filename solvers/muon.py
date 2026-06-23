@@ -1,7 +1,9 @@
 from contextlib import nullcontext
 
 import torch
-from benchmark_utils.distributed_tools import setup_distributed
+from benchmark_utils.distributed_tools import (
+    setup_distributed, broadcast_model
+)
 from benchmark_utils.lr_scheduler import get_lr
 from benchmark_utils.optimizers.muon import Muon
 from benchopt import BaseSolver
@@ -12,10 +14,14 @@ from tqdm.auto import tqdm
 class Solver(BaseSolver):
     name = "Muon"
 
+    # Defaults match modded-nanogpt 844e5fd: Muon on the transformer blocks
+    # at 0.1x the base lr, AdamW on the (tied) lm_head/embedding at the base
+    # lr, momentum 0.95, no weight decay, 6200 steps over a global batch of
+    # 8*64=512 sequences.
     parameters = {
-        "muon_lr": [0.02],
+        "muon_lr": [3.6e-4],
         "muon_momentum": [0.95],
-        "adam_lr": [3e-4],
+        "adam_lr": [3.6e-3],
         "adam_weight_decay": [0.0],
         "num_steps": [6200],
         "batch_size": [64],
@@ -107,8 +113,7 @@ class Solver(BaseSolver):
             rank=self.rank,
         )
 
-        if self.dist is not None:
-            self.dist.barrier()
+        broadcast_model(self.dist, self.model)
 
         step = 0
         with tqdm(total=self.num_steps, desc="Training") as progress:
@@ -133,8 +138,11 @@ class Solver(BaseSolver):
                             param.grad, op=self.dist.ReduceOp.AVG
                         )
 
-                # Scale learning rates with the schedule
-                scale_lr = get_lr(step, self.num_steps)
+                # Scale learning rates with the schedule. cooldown over the
+                # last 29% of training (~1800 steps at num_steps=6200, matching
+                # modded-nanogpt's warmdown), kept as a fraction so it scales
+                # with num_steps.
+                scale_lr = get_lr(step, self.num_steps, cooldown_frac=0.29)
                 for param_group in self.muon_optimizer.param_groups:
                     param_group["lr"] = torch.tensor(self.muon_lr * scale_lr)
                 for param_group in self.adam_optimizer.param_groups:

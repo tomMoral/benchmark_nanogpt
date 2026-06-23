@@ -34,14 +34,14 @@ class Muon(torch.optim.Optimizer):
     Args:
         params: Iterable of parameters to optimize or dicts defining
             parameter groups.
-        lr: Learning rate (default: 0.02).
+        lr: Learning rate (default: 3.6e-4).
         momentum: Nesterov momentum factor (default: 0.95).
         nesterov: Whether to use Nesterov momentum (default: True).
         ns_steps: Number of Newton-Schulz iteration steps (default: 5).
     """
 
     def __init__(
-            self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5
+            self, params, lr=3.6e-4, momentum=0.95, nesterov=True, ns_steps=5
     ):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -66,28 +66,26 @@ class Muon(torch.optim.Optimizer):
                 if g is None:
                     continue
 
-                # Orthogonalize: reshape to 2D, apply Newton-Schulz, reshape
-                # back
-                g_orth = self._newton_schulz(
-                    g.reshape(g.size(0), -1), steps=ns_steps
-                ).view(g.shape)
-
-                # Scale so that the update has unit Frobenius norm per
-                # "fan-in" dimension, matching the convention from
-                # modded-nanogpt.
-                d_out, d_in = g.shape[0], g[0].numel()
-                g_orth = g_orth * max(1, (d_out / d_in) ** 0.5)
-
+                # 1) Nesterov momentum on the *raw* gradient.
                 state = self.state[p]
                 if "momentum_buffer" not in state:
                     state["momentum_buffer"] = torch.zeros_like(g)
-
                 buf = state["momentum_buffer"]
-                buf.mul_(mu).add_(g_orth)
+                buf.mul_(mu).add_(g)
+                g = g.add(buf, alpha=mu) if nesterov else buf
 
-                if nesterov:
-                    update = g_orth + mu * buf
+                # 2) Orthogonalize the momentum-mixed gradient. The fused QKV
+                # weight (3*d_in, d_in) is split into its three blocks, each
+                # orthogonalized on its own (matching modded-nanogpt).
+                if g.size(0) == 3 * g.size(1):
+                    g = torch.cat([
+                        self._newton_schulz(g_i, steps=ns_steps)
+                        for g_i in g.split(g.size(1))
+                    ])
+                    scale = g.size(1) ** 0.5
                 else:
-                    update = buf
+                    g = self._newton_schulz(g, steps=ns_steps)
+                    # scale so update.square().mean() == 1
+                    scale = max(g.size(0), g.size(1)) ** 0.5
 
-                p.add_(update, alpha=-lr)
+                p.add_(g, alpha=-lr * scale)

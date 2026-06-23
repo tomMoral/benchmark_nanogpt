@@ -24,7 +24,7 @@ class Objective(BaseObjective):
         self.val_dataloader = val_dataloader
         self.model = model
 
-    def evaluate_result(self, model, dist=None):
+    def evaluate_result(self, model, dist=None, train_loss=None):
         model.eval()
         val_batch_size = 64  # Batch of 64 for validation
         if dist is not None:
@@ -43,7 +43,7 @@ class Objective(BaseObjective):
             # Compute the validation loss
             val_loss, n_batches = 0.0, 0
             for data in val_loader:
-                loss, *_ = self.model(*data)
+                loss, *_ = model(*data)
                 val_loss += loss.item()
                 n_batches += 1
             val_loss /= n_batches
@@ -58,8 +58,11 @@ class Objective(BaseObjective):
 
         # This method can return many metrics in a dictionary. One of these
         # metrics needs to be `value` for convergence detection purposes.
+        # `train_loss` is optionally reported by solvers (e.g. Muon-debug) so
+        # the train/val curves can be compared offline.
         return dict(
             value=val_loss,
+            train_loss=train_loss,
         )
 
     def get_one_result(self):

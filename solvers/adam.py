@@ -7,7 +7,9 @@ from torch.optim import AdamW
 from tqdm.auto import tqdm
 
 from benchmark_utils.lr_scheduler import get_lr_trapezoidal
-from benchmark_utils.distributed_tools import setup_distributed
+from benchmark_utils.distributed_tools import (
+    setup_distributed, broadcast_model
+)
 
 
 class Solver(BaseSolver):
@@ -82,11 +84,18 @@ class Solver(BaseSolver):
             if p.requires_grad
         }
 
-        # create optim groups. Any parameters that is 2D will be weight
-        # decayed, otherwise no. i.e. all weight tensors in
-        # matmuls + embeddings decay, all biases and layernorms don't.
-        decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
-        nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+        # create optim groups. 2D weight tensors in matmuls are weight
+        # decayed; biases, norms, and the (tied) token-embedding / lm_head
+        # are not. Decaying the tied embedding directly fights the model and
+        # hurts the final loss, so it stays in the no-decay group.
+        decay_params, nodecay_params = [], []
+        for n, p in param_dict.items():
+            if p.dim() >= 2 and not any(
+                k in n for k in ("wte", "wpe", "lm_head")
+            ):
+                decay_params.append(p)
+            else:
+                nodecay_params.append(p)
         optim_groups = [
             {'params': decay_params, 'weight_decay': self.weight_decay},
             {'params': nodecay_params, 'weight_decay': 0.0}
@@ -106,8 +115,7 @@ class Solver(BaseSolver):
             rank=self.rank,
         )
 
-        if self.dist is not None:
-            self.dist.barrier()  # wait for all processes to be ready
+        broadcast_model(self.dist, self.model)
 
         step = 0
         with tqdm(total=self.num_steps, desc="Training") as progress:

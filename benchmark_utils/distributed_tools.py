@@ -30,3 +30,12 @@ def setup_distributed():
         dist = None
 
     return dist, rank, world_size, device
+
+
+def broadcast_model(dist, model, src=0):
+    # Make sure all ranks start from identical weights.
+    if dist is None:
+        return
+    for param in model.parameters():
+        dist.broadcast(param.data, src=src)
+    dist.barrier()

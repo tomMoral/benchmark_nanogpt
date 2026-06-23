@@ -8,7 +8,9 @@ import torch
 
 from benchmark_utils.optimizers.soap import SOAP
 from benchmark_utils.lr_scheduler import get_lr
-from benchmark_utils.distributed_tools import setup_distributed
+from benchmark_utils.distributed_tools import (
+    setup_distributed, broadcast_model
+)
 
 
 class Solver(BaseSolver):
@@ -78,8 +80,7 @@ class Solver(BaseSolver):
             rank=self.rank,
         )
 
-        if self.dist is not None:
-            self.dist.barrier()
+        broadcast_model(self.dist, self.model)
 
         step = 0
         with tqdm(total=self.num_steps, desc="Training") as progress:

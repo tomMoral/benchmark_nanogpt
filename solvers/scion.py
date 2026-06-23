@@ -7,7 +7,9 @@ from tqdm.auto import tqdm
 
 from benchmark_utils.lr_scheduler import get_lr
 from benchmark_utils.optimizers.scion_light import ScionLight
-from benchmark_utils.distributed_tools import setup_distributed
+from benchmark_utils.distributed_tools import (
+    setup_distributed, broadcast_model
+)
 
 
 # The benchmark solvers must be named `Solver` and
@@ -112,8 +114,7 @@ class Solver(BaseSolver):
             rank=self.rank,
         )
 
-        if self.dist is not None:
-            self.dist.barrier()  # wait for all processes to be ready
+        broadcast_model(self.dist, self.model)
 
         step = 0
         with tqdm(total=self.num_steps, desc="Training") as progress:
