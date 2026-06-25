@@ -18,23 +18,19 @@ class Solver(BaseSolver):
 
     # Defaults follow modded-nanogpt commit
     # 844e5fdb2334ff83324e6f1f900ce443dd9e1226 (run.sh):
-    # lr=0.0018, betas=(0.9, 0.98), wd=0.1 (kept here because we use AdamW;
-    # the reference passes wd to its custom Adam which then ignores it),
-    # 9536 iterations with 256 warmup / 2048 warmdown, batch_size=64,
+    # lr=0.0018, betas=(0.9, 0.98), wd=0 (the reference's custom Adam
+    # ignores weight decay), 9536 iterations with 256 warmup / 2048 warmdown,
+    # batch_size=64,
     # sequence_length=1024 over 8 GPUs (=> global batch = 512).
     parameters = {
         'learning_rate': [1.8e-3],
-        'weight_decay': [0.1],
+        'weight_decay': [0.0],
         'num_steps': [9536],
         'batch_size': [64],
         'warmup_iters': [256],
         'warmdown_iters': [2048],
-        "slurm_nodes": [1, 2],
+        "slurm_nodes": [2],
         "sin_init": [False],
-    }
-    slurm_params = {
-        "slurm_gres": "gpu:4",
-        "slurm_ntasks_per_node": 4,
     }
 
     sampling_strategy = 'callback'
@@ -53,6 +49,7 @@ class Solver(BaseSolver):
         model = model.to(device=device)
         model.device = device  # store the device in the model
         self.train_dataloader = train_dataloader
+        self.train_loss = None
 
         # use mixed precision if cuda is available
         self.ctx = (
@@ -77,28 +74,13 @@ class Solver(BaseSolver):
 
     def run(self, cb):
 
-        # configure the optimizer
-        # List all parameters that require gradients
-        param_dict = {
-            pn: p for pn, p in self.model.named_parameters()
-            if p.requires_grad
-        }
-
-        # create optim groups. 2D weight tensors in matmuls are weight
-        # decayed; biases, norms, and the (tied) token-embedding / lm_head
-        # are not. Decaying the tied embedding directly fights the model and
-        # hurts the final loss, so it stays in the no-decay group.
-        decay_params, nodecay_params = [], []
-        for n, p in param_dict.items():
-            if p.dim() >= 2 and not any(
-                k in n for k in ("wte", "wpe", "lm_head")
-            ):
-                decay_params.append(p)
-            else:
-                nodecay_params.append(p)
+        # Weight-decay the 2D body matrices; not the embedding/head or 1D
+        # params (decaying the tied embedding hurts the final loss).
+        groups = self.model.optim_param_groups()
         optim_groups = [
-            {'params': decay_params, 'weight_decay': self.weight_decay},
-            {'params': nodecay_params, 'weight_decay': 0.0}
+            {'params': groups["matrix"], 'weight_decay': self.weight_decay},
+            {'params': groups["embed_head"] + groups["scalar"],
+             'weight_decay': 0.0},
         ]
 
         # Create AdamW optimizer. Betas (0.9, 0.98) match the reference.
@@ -131,6 +113,14 @@ class Solver(BaseSolver):
                 with self.ctx:
                     loss, *_ = self.model(*data)
                 loss.backward()
+
+                # Track a smoothed train loss (on-device, no per-step sync).
+                ema = loss.detach()
+                self.train_loss = (
+                    ema if self.train_loss is None
+                    else 0.9 * self.train_loss + 0.1 * ema
+                )
+
                 if self.dist is not None:
                     for param in self.model.parameters():
                         self.dist.all_reduce(
@@ -153,4 +143,7 @@ class Solver(BaseSolver):
     def get_result(self):
         if torch.cuda.is_available():
             torch.cuda.synchronize()  # wait for all operations to finish
-        return dict(model=self.model, dist=self.dist)
+        train_loss = (
+            float(self.train_loss) if self.train_loss is not None else None
+        )
+        return dict(model=self.model, dist=self.dist, train_loss=train_loss)

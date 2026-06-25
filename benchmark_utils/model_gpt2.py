@@ -207,3 +207,22 @@ class GPT(nn.Module):
             loss = None
 
         return loss, logits
+
+    def optim_param_groups(self):
+        """Structural parameter groups, so solvers stay architecture-agnostic.
+
+        - "matrix": 2D body weights (Muon/Scion-friendly; AdamW with decay).
+        - "embed_head": token embedding / output head (AdamW, no decay).
+        - "scalar": 1D params such as norms and biases (AdamW, no decay).
+        """
+        groups = {"matrix": [], "embed_head": [], "scalar": []}
+        for name, p in self.named_parameters():
+            if not p.requires_grad:
+                continue
+            if p.dim() < 2:
+                groups["scalar"].append(p)
+            elif any(k in name for k in ("wte", "wpe", "lm_head")):
+                groups["embed_head"].append(p)
+            else:
+                groups["matrix"].append(p)
+        return groups

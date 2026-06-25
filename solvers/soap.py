@@ -21,7 +21,7 @@ class Solver(BaseSolver):
         "weight_decay": [1e-4],
         "num_steps": [6200],
         "batch_size": [64],
-        "slurm_nodes": [1, 2],
+        "slurm_nodes": [2],
     }
     slurm_params = {
         "slurm_gres": "gpu:4",
@@ -37,6 +37,7 @@ class Solver(BaseSolver):
         model = model.to(device=device)
         model.device = device
         self.train_dataloader = train_dataloader
+        self.train_loss = None
 
         self.ctx = (
             torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16)
@@ -58,14 +59,12 @@ class Solver(BaseSolver):
         self.run_once(stop_val=10)
 
     def run(self, cb):
-        param_dict = {
-            pn: p for pn, p in self.model.named_parameters() if p.requires_grad
-        }
-        decay_params = [p for _, p in param_dict.items() if p.dim() >= 2]
-        nodecay_params = [p for _, p in param_dict.items() if p.dim() < 2]
+        # Weight-decay the 2D weights (body + embedding/head); not 1D params.
+        groups = self.model.optim_param_groups()
         optim_groups = [
-            {"params": decay_params, "weight_decay": self.weight_decay},
-            {"params": nodecay_params, "weight_decay": 0.0},
+            {"params": groups["matrix"] + groups["embed_head"],
+             "weight_decay": self.weight_decay},
+            {"params": groups["scalar"], "weight_decay": 0.0},
         ]
 
         self.optimizer = SOAP(
@@ -97,6 +96,14 @@ class Solver(BaseSolver):
                 with self.ctx:
                     loss, *_ = self.model(*data)
                 loss.backward()
+
+                # Track a smoothed train loss (on-device, no per-step sync).
+                ema = loss.detach()
+                self.train_loss = (
+                    ema if self.train_loss is None
+                    else 0.9 * self.train_loss + 0.1 * ema
+                )
+
                 if self.dist is not None:
                     for param in self.model.parameters():
                         self.dist.all_reduce(
@@ -114,4 +121,7 @@ class Solver(BaseSolver):
     def get_result(self):
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-        return dict(model=self.model, dist=self.dist)
+        train_loss = (
+            float(self.train_loss) if self.train_loss is not None else None
+        )
+        return dict(model=self.model, dist=self.dist, train_loss=train_loss)
