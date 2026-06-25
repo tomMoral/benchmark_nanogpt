@@ -26,6 +26,16 @@ class Objective(BaseObjective):
 
     def evaluate_result(self, model, dist=None, train_loss=None):
         model.eval()
+
+        if dist is not None:
+            # Solvers all-reduce gradients but not buffers, so models with
+            # BatchNorm (ResNet) keep per-rank running stats. Average the float
+            # buffers so every rank evaluates the same model. This is a no-op
+            # for the GPT model, whose only buffer is identical across ranks.
+            for buf in model.buffers():
+                if buf.is_floating_point():
+                    dist.all_reduce(buf, op=dist.ReduceOp.AVG)
+
         val_batch_size = 64  # Batch of 64 for validation
         if dist is not None:
             # In distributed mode, we use the distributed data generator
@@ -40,7 +50,9 @@ class Objective(BaseObjective):
             )
 
         with torch.no_grad():
-            # Compute the validation loss
+            # Average the per-batch eval metric returned by the model. In eval
+            # mode each model defines its own metric (GPT -> val loss, the
+            # CIFAR ResNet -> top-1 error), so the objective stays agnostic.
             val_loss, n_batches = 0.0, 0
             for data in val_loader:
                 loss, *_ = model(*data)
