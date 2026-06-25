@@ -8,6 +8,7 @@ import torch
 
 from benchmark_utils.optimizers.soap import SOAP
 from benchmark_utils.lr_scheduler import get_lr
+from benchmark_utils.torch_utils import compile_step
 from benchmark_utils.distributed_tools import (
     setup_distributed, broadcast_model
 )
@@ -46,7 +47,7 @@ class Solver(BaseSolver):
         )
 
         self.model = torch.compile(model, dynamic=False, fullgraph=True)
-        SOAP.step = torch.compile(torch.no_grad(SOAP.step))
+        compile_step(SOAP)
 
     def __del__(self):
         if getattr(self, "dist", None) is not None:

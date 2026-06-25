@@ -7,6 +7,7 @@ from tqdm.auto import tqdm
 
 from benchmark_utils.lr_scheduler import get_lr
 from benchmark_utils.optimizers.scion_light import ScionLight
+from benchmark_utils.torch_utils import compile_step
 from benchmark_utils.distributed_tools import (
     setup_distributed, broadcast_model
 )
@@ -54,7 +55,7 @@ class Solver(BaseSolver):
 
         # Torch compile the model and the optimizer step function
         self.model = torch.compile(model, dynamic=False, fullgraph=True)
-        ScionLight.step = torch.compile(torch.no_grad(ScionLight.step))
+        compile_step(ScionLight)
 
     def __del__(self):
         # Clean up communication resources

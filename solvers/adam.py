@@ -7,6 +7,7 @@ from torch.optim import AdamW
 from tqdm.auto import tqdm
 
 from benchmark_utils.lr_scheduler import get_lr_trapezoidal
+from benchmark_utils.torch_utils import compile_step
 from benchmark_utils.distributed_tools import (
     setup_distributed, broadcast_model
 )
@@ -59,7 +60,7 @@ class Solver(BaseSolver):
 
         # Torch compile the model and the optimizer step function
         self.model = torch.compile(model, dynamic=False, fullgraph=True)
-        AdamW.step = torch.compile(torch.no_grad(AdamW.step))
+        compile_step(AdamW)
 
     def __del__(self):
         # Clean up communication resources

@@ -2,23 +2,26 @@ from contextlib import nullcontext
 
 import torch
 from benchmark_utils.distributed_tools import (
-    setup_distributed, broadcast_model
+    setup_distributed, wrap_ddp, unwrap_model
 )
 from benchmark_utils.lr_scheduler import get_lr
 from benchmark_utils.optimizers.muon import Muon
-from benchmark_utils.torch_utils import compile_step
 from benchopt import BaseSolver
 from torch.optim import AdamW
 from tqdm.auto import tqdm
 
 
 class Solver(BaseSolver):
-    name = "Muon"
+    # DDP variant of the Muon solver, to test the speedup from overlapping
+    # the gradient all-reduce with the backward pass. Differences from `Muon`:
+    #   - the model is wrapped in DDP (which also broadcasts rank-0 weights at
+    #     construction, so broadcast_model is not needed);
+    #   - no manual all-reduce loop (DDP syncs gradients during backward);
+    #   - torch.compile drops fullgraph (DDP inserts graph breaks to overlap);
+    #   - get_result returns the unwrapped module, so the shared distributed
+    #     eval never goes through the DDP wrapper.
+    name = "Muon-DDP"
 
-    # Defaults match modded-nanogpt 844e5fd: Muon on the transformer blocks
-    # at 0.1x the base lr, AdamW on the (tied) lm_head/embedding at the base
-    # lr, momentum 0.95, no weight decay, 6200 steps over a global batch of
-    # 8*64=512 sequences.
     parameters = {
         "muon_lr": [3.6e-4],
         "muon_momentum": [0.95],
@@ -44,9 +47,8 @@ class Solver(BaseSolver):
             else nullcontext()
         )
 
-        self.model = torch.compile(model, dynamic=False, fullgraph=True)
-        compile_step(Muon)
-        compile_step(AdamW)
+        model = torch.compile(model, dynamic=False, fullgraph=True)
+        self.model = wrap_ddp(self.dist, model, device)
 
     def __del__(self):
         if getattr(self, "dist", None) is not None:
@@ -63,8 +65,8 @@ class Solver(BaseSolver):
 
     def run(self, cb):
         # Muon on the 2D body matrices; AdamW on the embedding/head and any
-        # 1D params.
-        groups = self.model.optim_param_groups()
+        # 1D params. Build groups from the unwrapped module.
+        groups = unwrap_model(self.model).optim_param_groups()
 
         self.muon_optimizer = Muon(
             groups["matrix"],
@@ -72,8 +74,7 @@ class Solver(BaseSolver):
             momentum=self.muon_momentum,
         )
 
-        # Embedding/head and 1D params are never weight-decayed (modded uses
-        # wd=0 on lm_head); Muon already handles the matrices.
+        # Embedding/head and 1D params are never weight-decayed.
         self.adam_optimizer = AdamW(
             groups["embed_head"] + groups["scalar"],
             lr=torch.tensor(self.adam_lr),
@@ -87,8 +88,6 @@ class Solver(BaseSolver):
             world_size=self.world_size,
             rank=self.rank,
         )
-
-        broadcast_model(self.dist, self.model)
 
         step = 0
         with tqdm(total=self.num_steps, desc="Training") as progress:
@@ -105,6 +104,7 @@ class Solver(BaseSolver):
                 data = next(train_loader)
                 with self.ctx:
                     loss, *_ = self.model(*data)
+                # DDP averages the gradients across ranks during backward.
                 loss.backward()
 
                 # Track a smoothed train loss (on-device, no per-step sync).
@@ -114,16 +114,7 @@ class Solver(BaseSolver):
                     else 0.9 * self.train_loss + 0.1 * ema
                 )
 
-                if self.dist is not None:
-                    for param in self.model.parameters():
-                        self.dist.all_reduce(
-                            param.grad, op=self.dist.ReduceOp.AVG
-                        )
-
-                # Scale learning rates with the schedule. cooldown over the
-                # last 29% of training (~1800 steps at num_steps=6200, matching
-                # modded-nanogpt's warmdown), kept as a fraction so it scales
-                # with num_steps.
+                # Scale learning rates with the schedule (see Muon solver).
                 scale_lr = get_lr(step, self.num_steps, cooldown_frac=0.29)
                 for param_group in self.muon_optimizer.param_groups:
                     param_group["lr"] = torch.tensor(self.muon_lr * scale_lr)
@@ -139,4 +130,8 @@ class Solver(BaseSolver):
         train_loss = (
             float(self.train_loss) if self.train_loss is not None else None
         )
-        return dict(model=self.model, dist=self.dist, train_loss=train_loss)
+        return dict(
+            model=unwrap_model(self.model),
+            dist=self.dist,
+            train_loss=train_loss,
+        )

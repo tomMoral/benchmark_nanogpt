@@ -54,7 +54,8 @@ class Sign(Norm):
         self.zero_init = zero_init
 
     def lmo(self, g):
-        _, d_in = g.shape
+        # Use the last dim so 1D params (e.g. biases) are handled too.
+        d_in = g.shape[-1]
         return (1 / d_in) * torch.sign(g)
 
 
