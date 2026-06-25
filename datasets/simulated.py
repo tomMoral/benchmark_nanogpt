@@ -41,6 +41,11 @@ class Dataset(BaseDataset):
         model.initialize_weights = (
             lambda seed: initialize_weights(model, seed=seed)
         )
+        model.optim_param_groups = lambda: {
+            "matrix": [model.weight],
+            "scalar": [model.bias] if model.bias is not None else [],
+            "embed_head": [],
+        }
 
         # The dictionary defines the keyword arguments for `Objective.set_data`
         return dict(
