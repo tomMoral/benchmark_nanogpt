@@ -74,18 +74,9 @@ class Muon(torch.optim.Optimizer):
                 buf.mul_(mu).add_(g)
                 g = g.add(buf, alpha=mu) if nesterov else buf
 
-                # 2) Orthogonalize the momentum-mixed gradient. The fused QKV
-                # weight (3*d_in, d_in) is split into its three blocks, each
-                # orthogonalized on its own (matching modded-nanogpt).
-                if g.size(0) == 3 * g.size(1):
-                    g = torch.cat([
-                        self._newton_schulz(g_i, steps=ns_steps)
-                        for g_i in g.split(g.size(1))
-                    ])
-                    scale = g.size(1) ** 0.5
-                else:
-                    g = self._newton_schulz(g, steps=ns_steps)
-                    # scale so update.square().mean() == 1
-                    scale = max(g.size(0), g.size(1)) ** 0.5
+                # 2) Orthogonalize the momentum-mixed gradient.
+                g = self._newton_schulz(g, steps=ns_steps)
+                # scale so update.square().mean() == 1
+                scale = max(g.size(0), g.size(1)) ** 0.5
 
                 p.add_(g, alpha=-lr * scale)

@@ -72,14 +72,17 @@ class CausalSelfAttention(nn.Module):
         self.n_embd = config.n_embd
         self.head_dim = self.n_embd // self.n_head
         assert self.n_embd % self.n_head == 0
-        self.c_attn = nn.Linear(self.n_embd, 3 * self.n_embd, bias=False)
+        self.c_q = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        self.c_k = nn.Linear(self.n_embd, self.n_embd, bias=False)
+        self.c_v = nn.Linear(self.n_embd, self.n_embd, bias=False)
         self.c_proj = nn.Linear(self.n_embd, self.n_embd, bias=False)
         self.rotary = Rotary(self.head_dim)
 
     def forward(self, x):
         B, T, C = x.size()
-        qkv = self.c_attn(x)
-        q, k, v = qkv.split(self.n_embd, dim=2)
+        q = self.c_q(x)
+        k = self.c_k(x)
+        v = self.c_v(x)
         k = k.view(B, T, self.n_head, self.head_dim)
         q = q.view(B, T, self.n_head, self.head_dim)
         v = v.view(B, T, self.n_head, self.head_dim)

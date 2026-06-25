@@ -18,10 +18,11 @@ class Solver(BaseSolver):
     name = "SOAP"
 
     parameters = {
-        "learning_rate": [3e-3],
+        "learning_rate": [2e-3],
         "weight_decay": [1e-4],
         "num_steps": [6200],
         "batch_size": [64],
+        "cooldown_frac": [0.3],
         "slurm_nodes": [2],
     }
     slurm_params = {
@@ -114,7 +115,11 @@ class Solver(BaseSolver):
                             param.grad, op=self.dist.ReduceOp.AVG
                         )
 
-                scale_lr = get_lr(step, self.num_steps)
+                scale_lr = get_lr(
+                    step,
+                    self.num_steps,
+                    cooldown_frac=self.cooldown_frac,
+                )
                 for param_group in self.optimizer.param_groups:
                     param_group["lr"] = torch.tensor(
                         self.learning_rate * scale_lr
