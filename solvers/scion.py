@@ -23,12 +23,13 @@ class Solver(BaseSolver):
     # the cross product for each key in the dictionary.
     # All parameters 'p' defined here are available as 'self.p'.
     parameters = {
-        "learning_rate": [0.00036],
+        "learning_rate": [0.00026],
         "momentum": [0.1],
         "hidden_radius": [50.0],
         "lm_head_radius": [3000.0],
-        "num_steps": [5100],
+        "num_steps": [6200],
         "batch_size": [64],
+        "cooldown_frac": [0.5],
         "slurm_nodes": [2],
     }
 
@@ -138,8 +139,11 @@ class Solver(BaseSolver):
                         )
 
                 # determine and set the learning rate for this iteration.
-                # cooldown over last ~28% (1450/5100, Scion reference).
-                scale_lr = get_lr(step, self.num_steps, cooldown_frac=0.28)
+                scale_lr = get_lr(
+                    step,
+                    self.num_steps,
+                    cooldown_frac=self.cooldown_frac,
+                )
                 for param_group in self.optimizer.param_groups:
                     param_group["lr"] = torch.tensor(
                         self.learning_rate * scale_lr

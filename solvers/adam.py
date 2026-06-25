@@ -25,11 +25,11 @@ class Solver(BaseSolver):
     # sequence_length=1024 over 8 GPUs (=> global batch = 512).
     parameters = {
         'learning_rate': [1.8e-3],
-        'weight_decay': [0.0],
+        'weight_decay': [0.1],
         'num_steps': [9536],
         'batch_size': [64],
         'warmup_iters': [256],
-        'warmdown_iters': [2048],
+        'warmdown_iters': [4768],  # 50%
         "slurm_nodes": [2],
         "sin_init": [False],
     }

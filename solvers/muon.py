@@ -25,6 +25,7 @@ class Solver(BaseSolver):
         "adam_lr": [3.6e-3],
         "num_steps": [6200],
         "batch_size": [64],
+        "cooldown_frac": [0.5],
         "slurm_nodes": [2],
     }
 
@@ -120,11 +121,12 @@ class Solver(BaseSolver):
                             param.grad, op=self.dist.ReduceOp.AVG
                         )
 
-                # Scale learning rates with the schedule. cooldown over the
-                # last 29% of training (~1800 steps at num_steps=6200, matching
-                # modded-nanogpt's warmdown), kept as a fraction so it scales
-                # with num_steps.
-                scale_lr = get_lr(step, self.num_steps, cooldown_frac=0.29)
+                # determine and set the learning rate for this iteration.
+                scale_lr = get_lr(
+                    step,
+                    self.num_steps,
+                    cooldown_frac=self.cooldown_frac,
+                )
                 for param_group in self.muon_optimizer.param_groups:
                     param_group["lr"] = torch.tensor(self.muon_lr * scale_lr)
                 for param_group in self.adam_optimizer.param_groups:
