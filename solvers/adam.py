@@ -34,8 +34,6 @@ class Solver(BaseSolver):
         "sin_init": [False],
     }
 
-    sampling_strategy = 'callback'
-
     def set_objective(self, train_dataloader, model):
 
         # Setup distributed training if needed

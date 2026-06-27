@@ -25,11 +25,9 @@ class Solver(BaseSolver):
         "adam_lr": [3.6e-3],
         "num_steps": [6200],
         "batch_size": [64],
-        "cooldown_frac": [0.5],
+        "cooldown_frac": [0.29],
         "slurm_nodes": [2],
     }
-
-    sampling_strategy = "callback"
 
     def set_objective(self, train_dataloader, model):
         self.dist, self.rank, self.world_size, device = setup_distributed()
@@ -121,11 +119,11 @@ class Solver(BaseSolver):
                             param.grad, op=self.dist.ReduceOp.AVG
                         )
 
-                # determine and set the learning rate for this iteration.
+                # Scale learning rates with the schedule. cooldown over the
+                # last cooldown_frac of training (kept as a fraction so it
+                # scales with num_steps).
                 scale_lr = get_lr(
-                    step,
-                    self.num_steps,
-                    cooldown_frac=self.cooldown_frac,
+                    step, self.num_steps, cooldown_frac=self.cooldown_frac
                 )
                 for param_group in self.muon_optimizer.param_groups:
                     param_group["lr"] = torch.tensor(self.muon_lr * scale_lr)

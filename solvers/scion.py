@@ -29,14 +29,12 @@ class Solver(BaseSolver):
         "lm_head_radius": [3000.0],
         "num_steps": [6200],
         "batch_size": [64],
-        "cooldown_frac": [0.5],
+        "cooldown_frac": [0.28],
         "slurm_nodes": [2],
     }
 
     # List of packages needed to run the solver.
     requirements = []
-
-    sampling_strategy = "callback"
 
     def set_objective(self, train_dataloader, model):
 
@@ -138,11 +136,9 @@ class Solver(BaseSolver):
                             param.grad, op=self.dist.ReduceOp.AVG
                         )
 
-                # determine and set the learning rate for this iteration.
+                # cooldown over the last cooldown_frac of training.
                 scale_lr = get_lr(
-                    step,
-                    self.num_steps,
-                    cooldown_frac=self.cooldown_frac,
+                    step, self.num_steps, cooldown_frac=self.cooldown_frac
                 )
                 for param_group in self.optimizer.param_groups:
                     param_group["lr"] = torch.tensor(
