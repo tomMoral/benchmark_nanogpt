@@ -100,4 +100,5 @@ class Dataset(BaseDataset):
             train_dataloader=DistributedDataLoader(train_dataset, train=True),
             val_dataloader=DistributedDataLoader(val_dataset, train=False),
             model=model,
+            target=0.05,  # stop once top-1 test error reaches 5%
         )
