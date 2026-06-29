@@ -29,7 +29,7 @@ class Solver(BaseSolver):
         "lm_head_radius": [3000.0],
         "num_steps": [6200],
         "batch_size": [64],
-        "cooldown_frac": [0.28],
+        "cooldown_frac": [0.29],
         "slurm_nodes": [2],
     }
 

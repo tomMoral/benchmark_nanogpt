@@ -22,7 +22,7 @@ class Solver(BaseSolver):
         "weight_decay": [1e-4],
         "num_steps": [6200],
         "batch_size": [64],
-        "cooldown_frac": [0.3],
+        "cooldown_frac": [0.29],
         "slurm_nodes": [2],
     }
 
