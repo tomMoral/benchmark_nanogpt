@@ -23,11 +23,11 @@ class Solver(BaseSolver):
     # the cross product for each key in the dictionary.
     # All parameters 'p' defined here are available as 'self.p'.
     parameters = {
-        "learning_rate": [0.00026],
+        "learning_rate": [0.00036],
         "momentum": [0.1],
         "hidden_radius": [50.0],
         "lm_head_radius": [3000.0],
-        "num_steps": [6200],
+        "num_steps": [5700],
         "batch_size": [64],
         "cooldown_frac": [0.5],
         "slurm_nodes": [2],

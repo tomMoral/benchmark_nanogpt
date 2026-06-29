@@ -22,8 +22,9 @@ class Solver(BaseSolver):
     parameters = {
         "muon_lr": [3.6e-4],
         "muon_momentum": [0.95],
+        "muon_weight_decay": [2.0],
         "adam_lr": [3.6e-3],
-        "num_steps": [6200],
+        "num_steps": [5000],
         "batch_size": [64],
         "cooldown_frac": [0.5],
         "slurm_nodes": [2],
@@ -71,6 +72,7 @@ class Solver(BaseSolver):
             groups["matrix"],
             lr=torch.tensor(self.muon_lr),
             momentum=self.muon_momentum,
+            weight_decay=self.muon_weight_decay
         )
 
         # Embedding/head and 1D params are never weight-decayed (modded uses

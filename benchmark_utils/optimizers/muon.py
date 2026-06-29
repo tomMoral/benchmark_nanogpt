@@ -41,12 +41,14 @@ class Muon(torch.optim.Optimizer):
     """
 
     def __init__(
-            self, params, lr=3.6e-4, momentum=0.95, nesterov=True, ns_steps=5
+            self, params, lr=3.6e-4, momentum=0.95, weight_decay=0.0,
+            nesterov=True, ns_steps=5,
     ):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
         defaults = dict(
-            lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps
+            lr=lr, momentum=momentum, weight_decay=weight_decay,
+            nesterov=nesterov, ns_steps=ns_steps,
         )
         super().__init__(params, defaults)
         # Compile Newton-Schulz at init time (class-level to avoid
@@ -57,6 +59,7 @@ class Muon(torch.optim.Optimizer):
     def step(self):
         for group in self.param_groups:
             lr = group["lr"]
+            wd = group["weight_decay"]
             mu = group["momentum"]
             nesterov = group["nesterov"]
             ns_steps = group["ns_steps"]
@@ -79,4 +82,6 @@ class Muon(torch.optim.Optimizer):
                 # scale so update.square().mean() == 1
                 scale = max(g.size(0), g.size(1)) ** 0.5
 
+                if wd > 0:
+                    p.add_(p, alpha=-wd * lr)
                 p.add_(g, alpha=-lr * scale)

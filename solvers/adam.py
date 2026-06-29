@@ -26,10 +26,10 @@ class Solver(BaseSolver):
     parameters = {
         'learning_rate': [1.8e-3],
         'weight_decay': [0.1],
-        'num_steps': [9536],
+        'num_steps': [8600],
         'batch_size': [64],
         'warmup_iters': [256],
-        'warmdown_iters': [4768],  # 50%
+        'cooldown_frac': [0.5],
         "slurm_nodes": [2],
         "sin_init": [False],
     }
@@ -135,7 +135,7 @@ class Solver(BaseSolver):
                 scale_lr = get_lr_trapezoidal(
                     step, self.num_steps,
                     warmup_iters=self.warmup_iters,
-                    warmdown_iters=self.warmdown_iters,
+                    cooldown_frac=self.cooldown_frac,
                 )
                 for param_group in self.optimizer.param_groups:
                     param_group['lr'] = torch.tensor(
