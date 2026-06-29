@@ -3,43 +3,48 @@ from benchopt import BaseSolver
 from contextlib import nullcontext
 
 import torch
+from torch.optim import SGD
 from tqdm.auto import tqdm
 
-from benchmark_utils.lr_scheduler import get_lr
-from benchmark_utils.optimizers.scion_light import ScionLight
+from benchmark_utils.lr_scheduler import get_lr_trapezoidal
 from benchmark_utils.torch_utils import compile_step
 from benchmark_utils.distributed_tools import (
     setup_distributed, broadcast_model
 )
 
 
-# The benchmark solvers must be named `Solver` and
-# inherit from `BaseSolver` for `benchopt` to work properly.
 class Solver(BaseSolver):
-    # Name to select the solver in the CLI and to display the results.
-    name = "Scion"
 
-    # List of parameters for the solver. The benchmark will consider
-    # the cross product for each key in the dictionary.
-    # All parameters 'p' defined here are available as 'self.p'.
+    name = 'SGD'
+
+    # Classic CIFAR ResNet baseline from the resnet_classif benchmark:
+    # SGD lr=0.1, momentum=0.9 (nesterov), weight_decay=5e-4, batch 128.
+    # Adapted to the distributed setting here: the benchmark's trapezoidal
+    # schedule replaces cosine so only the optimizer differs from the other
+    # solvers (apples-to-apples comparison).
     parameters = {
-        "learning_rate": [0.00036],
-        "momentum": [0.1],
-        "hidden_radius": [50.0],
-        "lm_head_radius": [3000.0],
-        "num_steps": [5700],
-        "batch_size": [64],
-        "cooldown_frac": [0.29],
+        'learning_rate': [0.1],
+        'momentum': [0.9],
+        'nesterov': [True],
+        'weight_decay': [5e-4],
+        'num_steps': [9600],
+        'batch_size': [128],
+        'warmup_iters': [500],
+        'warmdown_iters': [4800],
         "slurm_nodes": [2],
+        "sin_init": [False],
     }
-
-    # List of packages needed to run the solver.
-    requirements = []
 
     def set_objective(self, train_dataloader, model):
 
         # Setup distributed training if needed
         self.dist, self.rank, self.world_size, device = setup_distributed()
+
+        if self.sin_init:
+            print("Using sinusoidal initialization")
+            from benchmark_utils.sin_init import sinusoidal_
+            model.init_func = sinusoidal_
+            model.initialize_weights(seed=42)
 
         model = model.to(device=device)
         model.device = device  # store the device in the model
@@ -54,7 +59,7 @@ class Solver(BaseSolver):
 
         # Torch compile the model and the optimizer step function
         self.model = torch.compile(model, dynamic=False, fullgraph=True)
-        compile_step(ScionLight)
+        compile_step(SGD)
 
     def __del__(self):
         # Clean up communication resources
@@ -71,29 +76,22 @@ class Solver(BaseSolver):
         self.num_steps = n_iter
 
     def run(self, cb):
-        # Spectral norm on the 2D body matrices; Sign norm on the
-        # embedding/head (1D params, if any, ride with the head group).
+
+        # Weight-decay the 2D body matrices (conv/fc); not the 1D params
+        # (BatchNorm weights/biases), matching the other solvers' grouping.
         groups = self.model.optim_param_groups()
         optim_groups = [
-            {
-                "params": groups["matrix"],
-                "norm": "Spectral",
-                "norm_kwargs": {},
-                "scale": self.hidden_radius,
-            },
-            {
-                "params": groups["embed_head"] + groups["scalar"],
-                "norm": "Sign",
-                "norm_kwargs": {},
-                "scale": self.lm_head_radius,
-            },
+            {'params': groups["matrix"], 'weight_decay': self.weight_decay},
+            {'params': groups["embed_head"] + groups["scalar"],
+             'weight_decay': 0.0},
         ]
 
-        # Create ScionLight optimizer
-        self.optimizer = ScionLight(
+        self.optimizer = SGD(
             optim_groups,
             lr=torch.tensor(self.learning_rate),
-            momentum=self.momentum
+            momentum=self.momentum,
+            nesterov=self.nesterov,
+            fused=torch.cuda.is_available(),
         )
 
         train_loader = self.train_dataloader.get_distributed_data_generator(
@@ -108,16 +106,12 @@ class Solver(BaseSolver):
         with tqdm(total=self.num_steps, desc="Training") as progress:
             while cb():
                 self.model.train()
-
-                # Initialize gradients to zero on first step only
-                if step == 0:
-                    self.optimizer.zero_grad(set_to_none=True)
+                self.optimizer.zero_grad(set_to_none=True)
 
                 step += 1
                 progress.update()
                 if step == self.num_steps:
                     break
-
                 data = next(train_loader)
                 with self.ctx:
                     loss, *_ = self.model(*data)
@@ -136,18 +130,17 @@ class Solver(BaseSolver):
                             param.grad, op=self.dist.ReduceOp.AVG
                         )
 
-                # cooldown over the last cooldown_frac of training.
-                scale_lr = get_lr(
-                    step, self.num_steps, cooldown_frac=self.cooldown_frac
+                # determine and set the learning rate for this iteration
+                scale_lr = get_lr_trapezoidal(
+                    step, self.num_steps,
+                    warmup_iters=self.warmup_iters,
+                    warmdown_iters=self.warmdown_iters,
                 )
                 for param_group in self.optimizer.param_groups:
-                    param_group["lr"] = torch.tensor(
+                    param_group['lr'] = torch.tensor(
                         self.learning_rate * scale_lr
                     )
-
-                # step the optimizer
-                # Note: ScionLight uses gradients to store the momentum,
-                # so don't zero them
+                # step the self.optimizer
                 self.optimizer.step()
 
     def get_result(self):

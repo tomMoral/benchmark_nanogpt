@@ -22,15 +22,9 @@ class Solver(BaseSolver):
         "weight_decay": [1e-4],
         "num_steps": [5950],
         "batch_size": [64],
-        "cooldown_frac": [0.3],
+        "cooldown_frac": [0.29],
         "slurm_nodes": [2],
     }
-    slurm_params = {
-        "slurm_gres": "gpu:4",
-        "slurm_ntasks_per_node": 4,
-    }
-
-    sampling_strategy = "callback"
 
     def set_objective(self, train_dataloader, model):
         # Setup distributed training if needed

@@ -41,12 +41,13 @@ class Spectral(Norm):
             self.newton_schultz5 = torch.compile(zeropower_via_newtonschulz5)
 
     def lmo(self, g):
-        g = self.newton_schultz5(g.reshape(len(g), -1), steps=self.steps).view(
-            g.shape
-        )
+        # Conv weights (out, in, kh, kw) are flattened to 2D (out, in*kh*kw)
+        # for orthogonalization, then restored to the original shape.
+        orig_shape = g.shape
+        g = self.newton_schultz5(g.reshape(len(g), -1), steps=self.steps)
         d_out, d_in = g.shape
         g *= (d_out / d_in) ** 0.5
-        return g
+        return g.view(orig_shape)
 
 
 class Sign(Norm):

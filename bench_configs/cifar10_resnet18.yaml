@@ -1,0 +1,23 @@
+# Single-GPU ResNet-18 / CIFAR-10 recipes (Adam + SGD), aimed at ~5% top-1
+# test error. The objective `value` is the top-1 test error (the ResNet
+# returns it as its eval metric), so target ~0.05.
+#
+# Adam differs from the nanogpt defaults: batch 128 (vs 64), 200 epochs of
+# steps (vs ~12), non-zero decoupled weight decay (vs 0), and warmup/warmdown
+# rescaled to the longer run.
+#
+# Run with:
+#   benchopt run . --config bench_configs/cifar10_resnet18.yaml
+objective:
+  - Deep Learning Optimization with NanoGPT
+
+dataset:
+  - CIFAR-10
+
+solver:
+  - Adam[learning_rate=0.001,weight_decay=0.05,num_steps=78000,batch_size=128,warmup_iters=2000,warmdown_iters=39000,slurm_nodes=1,sin_init=False]
+  # SGD baseline (resnet_classif recipe): lr=0.1 for the single-GPU batch 128.
+  - SGD[learning_rate=0.1,momentum=0.9,nesterov=True,weight_decay=5e-4,num_steps=78000,batch_size=128,warmup_iters=2000,warmdown_iters=39000,slurm_nodes=1,sin_init=False]
+
+n-repetitions: 1
+timeout: 14400

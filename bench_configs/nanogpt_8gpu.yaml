@@ -1,0 +1,23 @@
+# NanoGPT / GPT-2 on FineWeb-10B, 8 GPUs (per-GPU batch 64 -> global 512).
+#
+# Pins the established nanoGPT recipe for each solver (the tuned defaults from
+# #17 "FIX QKV split for Scion + tune all optimizers") so these runs reproduce
+# the previously-used values explicitly, independent of any future change to the
+# solver defaults. The objective target is val loss 3.28.
+#
+#   benchopt run . --config bench_configs/nanogpt_8gpu.yaml \
+#       --slurm <your_slurm_config.yml>
+objective:
+  - Deep Learning Optimization with NanoGPT
+
+dataset:
+  - Fine-web[n_chunks=104,debug=False]
+
+solver:
+  - Adam[learning_rate=1.8e-3,weight_decay=0.1,num_steps=8600,batch_size=64,warmup_iters=256,cooldown_frac=0.5,slurm_nodes=2,sin_init=False]
+  - Muon[muon_lr=3.6e-4,muon_momentum=0.95,muon_weight_decay=2.0,adam_lr=3.6e-3,num_steps=5000,batch_size=64,cooldown_frac=0.5,slurm_nodes=2]
+  - Scion[learning_rate=0.00036,momentum=0.1,hidden_radius=50.0,lm_head_radius=3000.0,num_steps=5700,batch_size=64,cooldown_frac=0.5,slurm_nodes=2]
+  - SOAP[learning_rate=1.65e-3,weight_decay=1e-4,num_steps=5950,batch_size=64,cooldown_frac=0.3,slurm_nodes=2]
+
+n-repetitions: 1
+timeout: 20min

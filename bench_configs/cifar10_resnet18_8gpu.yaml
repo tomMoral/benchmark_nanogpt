@@ -1,0 +1,37 @@
+# ResNet-18 / CIFAR-10 recipes (Adam + SGD) on 8 GPUs, aimed at ~5% test error.
+#
+# `batch_size` is PER-GPU. With 8 ranks and gradient all-reduce, the global
+# batch is 128 * 8 = 1024 (8x the single-GPU config), so vs cifar10_resnet18.yaml:
+#   - num_steps  /= 8   : 50000 // 1024 ~ 48 steps/epoch -> 200 epochs ~ 9600
+#   - learning_rate up  : scaled for the 8x batch (Adam sqrt, SGD linear).
+#   - warmup/warmdown rescaled to the shorter (in steps) run.
+#
+# Launch with your existing nanoGPT SLURM setup. `slurm_nodes` (a solver param
+# folded into the submitit config by benchopt) must, together with your SLURM
+# config's tasks/gpus-per-node, yield 8 ranks total; adjust if your layout
+# differs. The objective `value` is the top-1 test error -> target ~0.05.
+#
+#   benchopt run . --config bench_configs/cifar10_resnet18_8gpu.yaml \
+#       --slurm <your_nanogpt_slurm_config.yml>
+objective:
+  - Deep Learning Optimization with NanoGPT
+
+dataset:
+  - CIFAR-10
+
+solver:
+  - Adam[learning_rate=0.0028,weight_decay=0.05,num_steps=9600,batch_size=128,warmup_iters=500,warmdown_iters=4800,slurm_nodes=2,sin_init=False]
+  # SGD baseline (resnet_classif recipe). lr linearly scaled for the 8x global
+  # batch (0.1 * 1024/128 = 0.8, Goyal et al.); may need tuning for stability.
+  - SGD[learning_rate=0.8,momentum=0.9,nesterov=True,weight_decay=5e-4,num_steps=9600,batch_size=128,warmup_iters=500,warmdown_iters=4800,slurm_nodes=2,sin_init=False]
+  # Muon on convs/fc, AdamW on BN params. muon_lr=0.01 best from the LR sweep
+  # (see notes/cifar10.md).
+  - Muon[muon_lr=0.01,adam_lr=0.0028,num_steps=9600,batch_size=128,slurm_nodes=2]
+  # Scion: Spectral norm on convs/fc, Sign norm on BN. lr=0.002 + cooldown_frac
+  # =0.4 best from the LR + schedule sweeps (radii at GPT defaults).
+  - Scion[learning_rate=0.002,num_steps=9600,batch_size=128,slurm_nodes=2,cooldown_frac=0.4]
+  # Fast Scion: 6400 steps -> 4.88% (within noise of 9600, ~33% cheaper).
+  - Scion[learning_rate=0.002,num_steps=6400,batch_size=128,slurm_nodes=2,cooldown_frac=0.4]
+
+n-repetitions: 3
+timeout: 20min

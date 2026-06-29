@@ -136,4 +136,5 @@ class Dataset(BaseDataset):
                 max_tokens=10485760 // 20 if self.debug else 10485760
             ),
             model=model,
+            target=3.28,  # stop once val loss reaches the nanoGPT target
         )

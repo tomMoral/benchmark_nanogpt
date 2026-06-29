@@ -77,6 +77,12 @@ class Muon(torch.optim.Optimizer):
                 buf.mul_(mu).add_(g)
                 g = g.add(buf, alpha=mu) if nesterov else buf
 
+                # Conv weights (out, in, kh, kw) are flattened to a 2D matrix
+                # (out, in*kh*kw) for orthogonalization, then restored.
+                orig_shape = g.shape
+                if g.ndim > 2:
+                    g = g.reshape(g.size(0), -1)
+
                 # 2) Orthogonalize the momentum-mixed gradient.
                 g = self._newton_schulz(g, steps=ns_steps)
                 # scale so update.square().mean() == 1
@@ -84,4 +90,4 @@ class Muon(torch.optim.Optimizer):
 
                 if wd > 0:
                     p.add_(p, alpha=-wd * lr)
-                p.add_(g, alpha=-lr * scale)
+                p.add_(g.reshape(orig_shape), alpha=-lr * scale)

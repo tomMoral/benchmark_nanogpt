@@ -2,6 +2,8 @@ from benchopt import BaseObjective
 
 import torch
 
+from benchmark_utils.stopping import TargetStoppingCriterion
+
 
 # The benchmark objective must be named `Objective` and
 # inherit from `BaseObjective` for `benchopt` to work properly.
@@ -19,13 +21,30 @@ class Objective(BaseObjective):
     # Bump it up if the benchmark depends on a new feature of benchopt.
     min_benchopt_version = "1.7"
 
-    def set_data(self, train_dataloader, val_dataloader, model):
+    # Budget is each solver's num_steps; stop early only if the dataset's
+    # target metric is reached (target read off this objective, see set_data).
+    stopping_criterion = TargetStoppingCriterion(strategy="callback")
+
+    def set_data(self, train_dataloader, val_dataloader, model, target=None):
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
         self.model = model
+        # Static per-dataset target for the stopping criterion (None => run the
+        # full budget). Read by TargetStoppingCriterion via the solver handle.
+        self.target = target
 
     def evaluate_result(self, model, dist=None, train_loss=None):
         model.eval()
+
+        if dist is not None:
+            # Solvers all-reduce gradients but not buffers, so models with
+            # BatchNorm (ResNet) keep per-rank running stats. Average the float
+            # buffers so every rank evaluates the same model. This is a no-op
+            # for the GPT model, whose only buffer is identical across ranks.
+            for buf in model.buffers():
+                if buf.is_floating_point():
+                    dist.all_reduce(buf, op=dist.ReduceOp.AVG)
+
         val_batch_size = 64  # Batch of 64 for validation
         if dist is not None:
             # In distributed mode, we use the distributed data generator
@@ -40,19 +59,24 @@ class Objective(BaseObjective):
             )
 
         with torch.no_grad():
-            # Compute the validation loss
-            val_loss, n_batches = 0.0, 0
+            # Sample-weighted average of the per-batch eval metric returned by
+            # the model. Cope with uneven batch effects.
+            total_loss, n_samples = 0.0, 0
             for data in val_loader:
                 loss, *_ = model(*data)
-                val_loss += loss.item()
-                n_batches += 1
-            val_loss /= n_batches
+                bs = data[-1].shape[0]
+                total_loss += loss.item() * bs
+                n_samples += bs
 
             if dist is not None:
-                # Average the validation loss across all processes
-                val_loss_tensor = torch.tensor(val_loss, device=model.device)
-                dist.all_reduce(val_loss_tensor, op=dist.ReduceOp.AVG)
-                val_loss = val_loss_tensor.item()
+                # Reduce sums to accomodate with partial batches.
+                stats = torch.tensor(
+                    [total_loss, n_samples], device=model.device
+                )
+                dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+                total_loss, n_samples = stats[0].item(), stats[1].item()
+
+            val_loss = total_loss / n_samples
 
         del val_loader
 
